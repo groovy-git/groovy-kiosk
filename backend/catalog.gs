@@ -711,33 +711,16 @@ function apiImportCatalog_(p, ctx) {
  * the second question on its own, so a sale on one phone no longer makes every other phone fetch
  * seventeen hundred products again.
  *
- * `since` is the timestamp the caller was last up to date at. The stock movements written since then
- * name the variants that moved, and only those are sent back. Without a usable `since` — a new
- * device, or one that has been off for longer than the movement history it can see — the whole map
- * comes back and the reply says so.
+ * The whole current map comes back every time (`full`), read from Branch_Stock — a table the size of
+ * the product list. Working out "what moved since `since`" meant reading the timestamp of every stock
+ * movement ever written, a column that grows with every item sold, and the map was read anyway to
+ * answer it. The full map is also exactly what the catalogue carries, so a phone can never drift from
+ * it. `since` is still accepted (older app versions send it) and ignored.
  */
 function apiGetStock_(p, ctx) {
     const now = nowStr_();
     const version = num_(setting_("stock_version"), 1);
-    const since = str_(p && p.since);
     const branch = num_(ctx.branch_id);
-    if (since && since.length >= 10) {
-        const moved = {};
-        windowRows_("Stock_Movements", "at", since, null).forEach((m) => (moved[m.variant_id] = true));
-        const ids = Object.keys(moved).map(Number);
-        if (ids.length <= 400) {
-            const byBranch = stockByBranch_();
-            const stock = stockMap_(branch);
-            const changed = {};
-            const changedByBranch = {};
-            ids.forEach((id) => {
-                changed[id] = stock[id] || 0;
-                changedByBranch[id] = byBranch[id] || {};
-            });
-            return { data: { stock_version: version, branch_id: branch, at: now, changed, by_branch: changedByBranch } };
-        }
-    }
-    // no usable starting point, or so much has moved that the whole map is cheaper to send
     const byBranch = stockByBranch_();
     const stock = stockMap_(branch);
     return { data: { stock_version: version, branch_id: branch, at: now, full: true, changed: stock, by_branch: byBranch } };

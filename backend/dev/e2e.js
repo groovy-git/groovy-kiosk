@@ -956,7 +956,13 @@ const afterStock = envR.call("getStock", { since: beforeStock.at }, RT2, 1).data
 check("after a sale the stock update carries the new figure",
     afterStock.stock_version > beforeStock.stock_version && afterStock.changed[rVid] === cv.variants.find((v) => v.id === rVid).stock_qty - 1,
     { changed: afterStock.changed, was: cv.variants.find((v) => v.id === rVid).stock_qty });
-check("the stock update only carries what moved", Object.keys(afterStock.changed).length <= 2 && !afterStock.full, afterStock.changed);
+// the stock update is the whole current map (no movement history is read), and it is exactly the
+// catalogue's stock — every variant, this branch and per branch
+const catNow = envR.call("getCatalog", {}, RT2, 1).data;
+check("the stock update is the whole current map", afterStock.full === true, afterStock.full);
+check("...and matches the catalogue for every variant", catNow.variants.every((v) =>
+    (afterStock.changed[v.id] || 0) === v.stock_qty && JSON.stringify(afterStock.by_branch[v.id] || {}) === JSON.stringify(v.stock_by_branch)),
+    catNow.variants.filter((v) => (afterStock.changed[v.id] || 0) !== v.stock_qty).map((v) => [v.id, afterStock.changed[v.id], v.stock_qty]));
 // with no starting point, the whole map comes back and says so
 const wholeMap = envR.call("getStock", {}, RT2, 1).data;
 check("a device with no starting point gets the whole stock map", wholeMap.full === true && Object.keys(wholeMap.changed).length > 0, Object.keys(wholeMap.changed).length);
