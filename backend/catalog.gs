@@ -390,7 +390,7 @@ function apiDeleteProduct_(p, ctx) {
             if (!rows.length) return;
             const sh = readTable_(name).sh;
             rows.sort((a, b) => b._r - a._r).forEach((r) => sh.deleteRow(r._r));
-            delete REQ_CACHE_[name];
+            forgetTable_(name);
         };
         drop("Stock_Movements", rows_("Stock_Movements").filter((m) => vids[m.variant_id]));
         drop("Branch_Stock", rows_("Branch_Stock").filter((b) => vids[b.variant_id]));

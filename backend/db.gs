@@ -159,15 +159,34 @@ function tailRows_(name, n) {
     return rowsFromValues_(name, sh.getRange(start, 1, last - start + 1, keys.length).getValues(), start);
 }
 
-/** One column's values, in sheet order — for "has this branch ever sold anything" style questions. */
+/**
+ * One column's values, in sheet order — for "has this branch ever sold anything" style questions.
+ * In an app request each column is read once: the sales list and dashboard both ask for Sales.date
+ * (the date window, then who each customer's first bill was). Every write to the table forgets it.
+ */
 function columnValues_(name, field) {
     if (REQ_CACHE_[name]) return REQ_CACHE_[name].rows.map((r) => r[field]);
+    const memo = REQ_CACHE_.__api ? (REQ_CACHE_["__col_" + name] = REQ_CACHE_["__col_" + name] || {}) : null;
+    if (memo && memo[field]) return memo[field];
     const sh = sheet_(name);
     const last = sh.getLastRow();
     if (last < 2) return [];
     const c = headerCell_(sh, name, field);
     const type = SCHEMA[name][field];
-    return sh.getRange(2, c, last - 1, 1).getValues().map((r) => fromCell_(r[0], type));
+    const vals = sh.getRange(2, c, last - 1, 1).getValues().map((r) => fromCell_(r[0], type));
+    if (memo) memo[field] = vals;
+    return vals;
+}
+
+/** A table was written: drop its cached rows and any columns read from it this request. */
+function forgetTable_(name) {
+    delete REQ_CACHE_[name];
+    delete REQ_CACHE_["__col_" + name];
+}
+
+// the cached rows stay (they are kept in step), only the columns read straight off the sheet go
+function forgetColumns_(name) {
+    delete REQ_CACHE_["__col_" + name];
 }
 
 /**
@@ -310,6 +329,7 @@ function ensureRows_(sh, needLast) {
  */
 function appendRows_(name, objs) {
     if (!objs.length) return;
+    forgetColumns_(name);
     const cached = REQ_CACHE_[name] || null;
     const sh = cached ? cached.sh : sheet_(name);
     const keys = cached ? cached.keys : cols_(name);
@@ -342,6 +362,7 @@ function asStored_(name, obj) {
 
 /** Write back full records that carry `_r`. */
 function updateRows_(name, objs) {
+    forgetColumns_(name);
     const t = readTable_(name);
     objs.forEach((o) => {
         if (!o._r) throw new Error("updateRows_ needs _r");
@@ -355,6 +376,7 @@ function updateRows_(name, objs) {
  */
 function updateRowsBatch_(name, objs) {
     if (!objs.length) return;
+    forgetColumns_(name);
     const t = readTable_(name);
     const byRow = {};
     t.rows.forEach((o) => (byRow[o._r] = o));
@@ -372,6 +394,7 @@ function updateRowsBatch_(name, objs) {
 
 /** Update single columns for many records: [{_r, ...fields}] — one call per cell. */
 function updateFields_(name, obj, fields) {
+    forgetColumns_(name);
     const t = readTable_(name);
     fields.forEach((f) => {
         const c = t.keys.indexOf(f);
@@ -386,6 +409,7 @@ function updateFields_(name, obj, fields) {
  */
 function writeColumn_(name, records, field) {
     if (!records.length) return;
+    forgetColumns_(name);
     const t = readTable_(name);
     const c = t.keys.indexOf(field) + 1;
     const sorted = records.slice().sort((a, b) => a._r - b._r);
@@ -406,7 +430,7 @@ function writeColumn_(name, records, field) {
 function deleteRow_(name, obj) {
     const t = readTable_(name);
     t.sh.deleteRow(obj._r);
-    delete REQ_CACHE_[name]; // row numbers shifted
+    forgetTable_(name); // row numbers shifted
 }
 
 function withLock_(fn) {

@@ -113,7 +113,7 @@ function endUserSessions_(userId, exceptToken) {
         cache.remove("s_" + s.token);
         readTable_("Sessions").sh.deleteRow(s._r);
     });
-    delete REQ_CACHE_["Sessions"];
+    forgetTable_("Sessions");
 }
 
 /* ---------- public actions ---------- */
@@ -142,7 +142,7 @@ function apiLogin_(p) {
             .filter((x) => x.user_id === u.id && x.expires_at < now)
             .sort((a, b) => b._r - a._r)
             .forEach((x) => readTable_("Sessions").sh.deleteRow(x._r));
-        delete REQ_CACHE_["Sessions"];
+        forgetTable_("Sessions");
         const t = createSession_(u, p.device);
         log_({ user: u }, "LOGIN", "Users", u.id, "");
         return t;
