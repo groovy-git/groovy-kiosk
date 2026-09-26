@@ -298,34 +298,35 @@ function savePdfForSale_(s) {
     const url = makePdf_(invoicePdfHtml_(saleDetail_(s, null)), pdfName_(s.invoice_no, voided), invoiceFolder_(s.date, isTaxInvoice_(s)));
     const stored = url + (voided ? PDF_VOID_MARK_ : "");
     return withLock_(() => {
-        const fresh = findBy_("Sales", "id", s.id);
+        // every checkout waits on this lock: look at the bill's own row, not the whole sheet
+        const fresh = rowIfId_("Sales", s._r, s.id) || findBy_("Sales", "id", s.id);
         if (!fresh) return { pdf_url: "" };
         if (fresh.pdf_url) {
             trashPdf_(url); // someone else saved it meanwhile — keep one file
             return { pdf_url: fresh.pdf_url, already: true };
         }
         fresh.pdf_url = stored;
-        updateFields_("Sales", fresh, ["pdf_url"]);
+        setCell_("Sales", fresh, "pdf_url");
         return { pdf_url: stored };
     });
 }
 
 function savePdfForReturn_(r) {
     // a credit note is filed with the bill it belongs to
-    const sale = findBy_("Sales", "id", r.sale_id);
+    const sale = findById_("Sales", r.sale_id);
     const gst = sale ? isTaxInvoice_(sale) : !!str_(setting_("gstin"));
     const url = makePdf_(creditNoteHtml_(r), pdfName_(r.credit_note_no, false), invoiceFolder_(r.at, gst));
     withLock_(() => {
-        const fresh = findBy_("Returns", "id", r.id);
+        const fresh = rowIfId_("Returns", r._r, r.id) || findBy_("Returns", "id", r.id);
         if (!fresh) return;
         if (fresh.pdf_url) return trashPdf_(url);
         fresh.pdf_url = url;
-        updateFields_("Returns", fresh, ["pdf_url"]);
+        setCell_("Returns", fresh, "pdf_url");
     });
 }
 
 function apiSaveInvoicePdf_(p, ctx) {
-    const s = findBy_("Sales", "id", Number(p.id));
+    const s = findById_("Sales", p.id);
     if (!s) fail_("Bill not found");
     if (!canSeeSale_(ctx, s)) fail_("You can't open this bill", "FORBIDDEN");
     if (s.pdf_url) return { message: "PDF already saved in Drive", data: { pdf_url: s.pdf_url, already: true } };
@@ -364,10 +365,10 @@ function savePendingInvoicePdfs() {
             } else if (s.status === "voided" && s.pdf_url.slice(-PDF_VOID_MARK_.length) !== PDF_VOID_MARK_) {
                 DriveApp.getFileById(pdfFileId_(s.pdf_url)).setName(pdfName_(s.invoice_no, true));
                 withLock_(() => {
-                    const fresh = findBy_("Sales", "id", s.id);
+                    const fresh = rowIfId_("Sales", s._r, s.id) || findBy_("Sales", "id", s.id);
                     if (fresh && fresh.pdf_url && fresh.pdf_url.slice(-PDF_VOID_MARK_.length) !== PDF_VOID_MARK_) {
                         fresh.pdf_url += PDF_VOID_MARK_;
-                        updateFields_("Sales", fresh, ["pdf_url"]);
+                        setCell_("Sales", fresh, "pdf_url");
                     }
                 });
                 done++;

@@ -807,6 +807,24 @@ const pdfLeft = require("vm").runInContext('resetReqCache_(); rows_("Sales").fil
 check("timer: every bill and credit note now has a PDF", jobDone > 0 && pdfLeft === 0, { jobDone, pdfLeft });
 check("credit notes saved as PDFs", require("vm").runInContext('rows_("Returns").every((r) => r.pdf_url)', ctx) &&
     pdfFiles().some((f) => /C-|CN-/.test(f.name) && f.html.includes("CREDIT NOTE")));
+// the lock only looks at the bill's own row — if rows moved in between, it finds the bill the old way
+const shiftSale = ok(call("completeSale", { client_ref: "pdf-shift", lines: [{ variant_id: vBottle.id, qty: 1 }], payments: [{ method: "cash", amount: 50 }] }, T, 1), "bill for the row-shift PDF").sale;
+const neighbour = ok(call("completeSale", { client_ref: "pdf-shift-2", lines: [{ variant_id: vBottle.id, qty: 1 }], payments: [{ method: "cash", amount: 50 }] }, T, 1), "bill after it").sale;
+const shiftRow = vmRun(`resetReqCache_(); globalThis.__shiftS = rows_("Sales").find((s) => s.id === ${shiftSale.id}); __shiftS._r`);
+env.ss.getSheetByName("Sales").deleteRow(shiftRow - 1); // someone deletes the row above by hand: every row moves up one
+const shifted = vmRun(`resetReqCache_(); savePdfForSale_(__shiftS)`);
+const afterShift = ok(call("getSale", { id: shiftSale.id }, T, 1), "row-shift bill").sale;
+const nbAfter = ok(call("getSale", { id: neighbour.id }, T, 1), "its neighbour").sale;
+check("rows moved: PDF link still lands on the right bill", !!shifted.pdf_url && afterShift.pdf_url === shifted.pdf_url, { shifted, got: afterShift.pdf_url });
+check("rows moved: the bill below is not touched", !nbAfter.pdf_url, nbAfter.pdf_url);
+// another save got there first while this PDF was being made: keep the first link, bin the new file
+const raceSale = vmRun(`resetReqCache_(); globalThis.__raceS = rows_("Sales").find((s) => s.id === ${neighbour.id}); __raceS.id`);
+vmRun(`resetReqCache_(); const f = findBy_("Sales", "id", ${raceSale}); f.pdf_url = "https://drive.google.com/file/d/FIRST/view"; updateFields_("Sales", f, ["pdf_url"]);`);
+const filesBefore = pdfFiles().length;
+const raced = vmRun(`resetReqCache_(); savePdfForSale_(__raceS)`);
+check("saved meanwhile: first link kept, reported as already saved", raced.already === true && raced.pdf_url === "https://drive.google.com/file/d/FIRST/view", raced);
+check("saved meanwhile: the extra file is binned", pdfFiles().length === filesBefore, [filesBefore, pdfFiles().length]);
+check("saved meanwhile: bill still has the first link", ok(call("getSale", { id: raceSale }, T, 1), "raced bill").sale.pdf_url === "https://drive.google.com/file/d/FIRST/view");
 // old yyyy-MM folders (before the FY layout) are moved into FY …/MM by the timer; links stay the same
 let pdfRootF = pdfFile.parent; // walk up to Sales_Invoices
 while (pdfRootF && pdfRootF.name !== "Sales_Invoices") pdfRootF = pdfRootF.parent;

@@ -360,6 +360,39 @@ function asStored_(name, obj) {
     return copy;
 }
 
+/**
+ * The record at sheet row r, if that row still holds this id — read as one row instead of the whole
+ * table. null when it doesn't (the sheet was sorted or rows deleted by hand, or the row can't be read):
+ * the caller then looks the id up the old way.
+ */
+function rowIfId_(name, r, id) {
+    if (!r || r < 2) return null;
+    try {
+        const vals = sheet_(name).getRange(r, 1, 1, cols_(name).length).getValues();
+        const row = rowsFromValues_(name, vals, r)[0];
+        return row && row.id === Number(id) ? row : null;
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Write one field of a record at its row (`_r`) without reading the table — the same cell and the same
+ * value updateFields_ writes. Like readTable_, it first checks the sheet's last header, so a sheet that
+ * needs Setup still says so.
+ */
+function setCell_(name, obj, field) {
+    forgetColumns_(name);
+    const keys = cols_(name);
+    const c = keys.indexOf(field) + 1;
+    if (c < 1) throw new Error("Unknown column " + field);
+    const sh = sheet_(name);
+    headerCell_(sh, name, keys[keys.length - 1]);
+    sh.getRange(obj._r, c).setValue(toCell_(obj[field], SCHEMA[name][field]));
+    const t = REQ_CACHE_[name];
+    if (t) t.rows.forEach((row) => row._r === obj._r && (row[field] = obj[field])); // keep a cached copy in step
+}
+
 /** Write back full records that carry `_r`. */
 function updateRows_(name, objs) {
     forgetColumns_(name);
