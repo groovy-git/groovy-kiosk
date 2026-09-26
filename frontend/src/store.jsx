@@ -66,6 +66,7 @@ export function AppProvider({ children }) {
   const branchRef = useRef(branchId);
   const refreshing = useRef(false);
   const refreshingStock = useRef(false);
+  const stockWanted = useRef(0); // newest stock number seen while a refresh was on its way
   const stockVersionRef = useRef(Number(load("gp_stock_version", 0)) || 0);
 
   const toast = useCallback((message, type = "info", ms = 2600) => {
@@ -113,40 +114,51 @@ export function AppProvider({ children }) {
   }, []);
 
   /**
-   * Stock changed somewhere — fetch just what moved since this phone was last up to date.
-   * `stock_at` is the server's clock, not this device's, so a phone with a wrong time still asks for
-   * the right window. Without it (a fresh install, or a phone that has been off a long time) the
-   * server sends the whole map and says so.
+   * Stock changed somewhere — fetch the current stock (the server now always sends the whole map).
+   * `stock_at` is the server's clock, not this device's; it is still sent for older server versions.
+   *
+   * A newer stock number can arrive while a refresh is on its way — this phone's own next sale, say.
+   * If the answer that lands is older than that number, the stock is fetched once more; otherwise the
+   * phone would show the older count until something else asked the server. (The refresh's own reply
+   * carries the number it answers for, so it never asks again for itself.)
    */
-  const refreshStock = useCallback(async () => {
-    if (refreshingStock.current) return;
+  const refreshStock = useCallback(async (sv) => {
+    if (refreshingStock.current) {
+      stockWanted.current = Math.max(stockWanted.current, Number(sv) || 0);
+      return;
+    }
     refreshingStock.current = true;
     try {
-      const since = load("gp_stock_at", "");
-      const r = await api("getStock", since ? { since } : {});
-      const d = r.data;
-      setRawCatalog((c) => {
-        if (!c) return c;
-        const qty = d.changed || {};
-        const byBranch = d.by_branch || {};
-        const next = {
-          ...c,
-          variants: c.variants.map((v) =>
-            Object.prototype.hasOwnProperty.call(qty, v.id)
-              ? { ...v, stock_qty: qty[v.id], stock_by_branch: byBranch[v.id] || v.stock_by_branch }
-              : d.full
-                ? { ...v, stock_qty: 0, stock_by_branch: byBranch[v.id] || {} } // full map: anything missing has none left
-                : v,
-          ),
-        };
-        save("gp_catalog", next);
-        return next;
-      });
-      stockVersionRef.current = d.stock_version;
-      save("gp_stock_version", d.stock_version);
-      save("gp_stock_at", d.at);
-    } catch {
-      /* keep what we have; the next reply will ask again */
+      do {
+        stockWanted.current = 0;
+        try {
+          const since = load("gp_stock_at", "");
+          const r = await api("getStock", since ? { since } : {});
+          const d = r.data;
+          setRawCatalog((c) => {
+            if (!c) return c;
+            const qty = d.changed || {};
+            const byBranch = d.by_branch || {};
+            const next = {
+              ...c,
+              variants: c.variants.map((v) =>
+                Object.prototype.hasOwnProperty.call(qty, v.id)
+                  ? { ...v, stock_qty: qty[v.id], stock_by_branch: byBranch[v.id] || v.stock_by_branch }
+                  : d.full
+                    ? { ...v, stock_qty: 0, stock_by_branch: byBranch[v.id] || {} } // full map: anything missing has none left
+                    : v,
+              ),
+            };
+            save("gp_catalog", next);
+            return next;
+          });
+          stockVersionRef.current = d.stock_version;
+          save("gp_stock_version", d.stock_version);
+          save("gp_stock_at", d.at);
+        } catch {
+          /* keep what we have; the next reply will ask again */
+        }
+      } while (stockWanted.current > stockVersionRef.current && getToken()); // not after a logout: nobody to fetch it for
     } finally {
       refreshingStock.current = false;
     }
@@ -167,6 +179,7 @@ export function AppProvider({ children }) {
 
   const logoutLocal = useCallback(() => {
     loginDashboard = null; // never shown to the next person
+    stockWanted.current = 0;
     clearToken();
     clearBranch(); // the next person on this phone starts at their own home branch
     // shared phones: the next person must not see this person's data (costs, carts, figures, emails)
@@ -203,7 +216,7 @@ export function AppProvider({ children }) {
       // Neither runs while the first load is still going: bootstrap is already fetching it.
       version: (cv, sv) => {
         if (cv > versionRef.current && cachedRef.current) refreshCatalog();
-        else if (sv && sv > stockVersionRef.current && cachedRef.current) refreshStock();
+        else if (sv && sv > stockVersionRef.current && cachedRef.current) refreshStock(sv);
       },
     });
   }, [logoutLocal, refreshCatalog, refreshStock, toast]);
