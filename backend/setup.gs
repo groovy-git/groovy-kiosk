@@ -356,6 +356,14 @@ function setupSheets() {
     } catch (e) {
         console.error("ensureBackupTrigger_", e);
     }
+    // spare empty rows in every table, and the nightly job that keeps them topped up (maintenance.gs)
+    resetReqCache_();
+    topUpSpareRows_();
+    try {
+        ensureMaintenanceTrigger_();
+    } catch (e) {
+        console.error("ensureMaintenanceTrigger_", e);
+    }
 
     // invoice folders used to be remembered by Drive id; they are found by name now, so these
     // leftovers would only mislead whoever reads Project Settings next

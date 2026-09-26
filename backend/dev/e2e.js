@@ -1887,5 +1887,97 @@ xSalesSh.getRange(1, xDateCol).setValue("date");
 check("...and works again once the header is right", xEnv.call("listSales", {}, XT, 1).success);
 
 
+// ---- a stale sheet size must not put rows in the middle ----
+// On Google, getMaxRows() can still report the size from before another person's save grew the sheet
+// (seen in the 12-person stress test). Rows must still go in order, under the last row with data.
+{
+    const sEnv = createEnv();
+    sEnv.ctx.setupSheets();
+    const sPwd = /Password: (\S+)/.exec(sEnv.alerts.pop())[1];
+    const ST = sEnv.call("login", { email: "owner@groovy.test", password: sPwd }).data.token;
+    const exp = (title) => sEnv.call("saveExpense", { amount: 10, title, category: "Other", method: "cash" }, ST, 1);
+    ok(exp("before"), "expense before the sheet fills");
+    const sh = sEnv.ss.getSheetByName("Expenses");
+    sh.maxRows = sh.getLastRow(); // the sheet is full: the next save has to add rows
+    const staleMax = sh.maxRows;
+    ok(exp("A"), "expense A grows the sheet");
+    const realMax = sh.getMaxRows;
+    sh.getMaxRows = () => staleMax; // the next save still sees the size from before A
+    ok(exp("B"), "expense B with an out-of-date sheet size");
+    sh.getMaxRows = realMax;
+    ok(exp("C"), "expense C afterwards");
+    const last = sh.getLastRow();
+    const col = (c) => sh.getRange(2, c, last - 1, 1).getValues().map((r) => r[0]);
+    const ids = col(1).filter((v) => v !== "");
+    const titles = col(require("vm").runInContext('Object.keys(SCHEMA.Expenses).indexOf("title")', sEnv.ctx) + 1).filter((v) => v !== "");
+    check("stale size: no blank rows in the middle of the data", ids.length === last - 1, { dataRows: ids.length, lastRow: last });
+    check("stale size: rows stay in the order they were saved", JSON.stringify(titles) === JSON.stringify(["before", "A", "B", "C"]), titles);
+    check("stale size: ids never repeat", new Set(ids).size === ids.length, ids);
+    const spareRows = require("vm").runInContext("SPARE_ROWS_", sEnv.ctx);
+    check("stale size: the sheet doesn't balloon", sh.getMaxRows() <= last + 2 * (1 + spareRows), { maxRows: sh.getMaxRows(), last, spareRows });
+}
+
+// ---- spare rows, and records removed by emptying their row (sheet sizes never change during the day) ----
+{
+    const mEnv = createEnv();
+    mEnv.ctx.setupSheets();
+    const mPwd = /Password: (\S+)/.exec(mEnv.alerts.pop())[1];
+    const MT = mEnv.call("login", { email: "owner@groovy.test", password: mPwd }).data.token;
+    const mRun = (code) => require("vm").runInContext(code, mEnv.ctx);
+    const SPARE = mRun("SPARE_ROWS_"), LOW = mRun("SPARE_LOW_");
+    const sizes = () => Object.fromEntries(mEnv.ss.getSheets().map((s) => [s.getName(), s.getMaxRows()]));
+    const lowTables = Object.keys(sizes()).filter((n) => mRun(`!!SCHEMA[${JSON.stringify(n)}]`)).filter((n) => { const s = mEnv.ss.getSheetByName(n); return s.getMaxRows() - s.getLastRow() < LOW; });
+    check("setup leaves every table with spare empty rows", lowTables.length === 0, lowTables);
+    // a table running low is topped up under its data; one with enough is left alone
+    const exS = mEnv.ss.getSheetByName("Expenses");
+    for (const t of ["a", "b"]) ok(mEnv.call("saveExpense", { amount: 5, title: t, category: "Other", method: "cash" }, MT, 1), "expense " + t);
+    const exLast = exS.getLastRow();
+    exS.maxRows = exLast + 10; // only 10 spare left
+    const before = sizes();
+    const added = mRun("resetReqCache_(); topUpSpareRows_()");
+    check("top-up: only the low table grows", Object.keys(added).length === 1 && added.Expenses === SPARE - 10, added);
+    check("top-up: to the full stock of spare rows", exS.getMaxRows() - exS.getLastRow() === SPARE, [exS.getMaxRows(), exS.getLastRow()]);
+    check("top-up: the data isn't split", exS.getLastRow() === exLast && exS.getRange(2, 1, exLast - 1, 1).getValues().every((r) => r[0] !== ""));
+    check("top-up: other tables untouched", Object.keys(before).filter((n) => n !== "Expenses").every((n) => sizes()[n] === before[n]));
+    // records removed during the day: gone from the app, sheet size unchanged, ids stay unique
+    const catFirst = mEnv.call("getCatalog", {}, MT, 1).data.categories[0].id;
+    ok(mEnv.call("saveProduct", { name: "Hold Item", category_id: catFirst, gst_rate: 18, variants: [{ size_label: "10ml", mrp: 100, sell_price: 100, cost: 50, opening_stock: 20, barcode: "HOLD1" }] }, MT, 1), "item to sell");
+    const vid = mEnv.call("getCatalog", {}, MT, 1).data.variants.find((v) => v.barcode === "HOLD1");
+    const sizeNow = sizes();
+    const h1 = ok(mEnv.call("holdBill", { label: "h1", cart: { lines: [{ variant_id: vid.id, qty: 1 }] } }, MT, 1), "hold h1").id;
+    const h2 = ok(mEnv.call("holdBill", { label: "h2", cart: { lines: [{ variant_id: vid.id, qty: 1 }] } }, MT, 1), "hold h2").id;
+    ok(mEnv.call("deleteHeld", { id: h1 }, MT, 1), "delete held h1");
+    const heldNow = ok(mEnv.call("listHeld", {}, MT, 1), "held list").map((h) => h.id);
+    check("held bill removed: not listed", !heldNow.includes(h1) && heldNow.includes(h2), heldNow);
+    const h3 = ok(mEnv.call("holdBill", { label: "h3", cart: { lines: [{ variant_id: vid.id, qty: 1 }] } }, MT, 1), "hold h3").id;
+    check("held bill removed: next id still unique", ![h1, h2].includes(h3), [h1, h2, h3]);
+    ok(mEnv.call("completeSale", { client_ref: "m-held", held_id: h2, lines: [{ variant_id: vid.id, qty: 1 }], payments: [{ method: "cash", amount: 99999 }] }, MT, 1), "sale from held h2");
+    check("sale from a held bill removes it", !ok(mEnv.call("listHeld", {}, MT, 1), "held list").some((h) => h.id === h2));
+    const exId = ok(mEnv.call("saveExpense", { amount: 7, title: "gone", category: "Other", method: "cash" }, MT, 1), "expense to delete").id;
+    ok(mEnv.call("deleteExpense", { id: exId }, MT, 1), "delete expense");
+    check("expense removed: not listed", !ok(mEnv.call("listExpenses", {}, MT, 1), "expenses").expenses.some((e) => e.id === exId));
+    const uid = ok(mEnv.call("saveUser", { name: "Temp", email: "temp.m@x.in", role: "salesperson", password: "secret1", branch_id: 1 }, MT, 1), "temp user").id;
+    const TT = ok(mEnv.call("login", { email: "temp.m@x.in", password: "secret1" }), "temp login").token;
+    ok(mEnv.call("logout", {}, TT, 1), "temp logout");
+    check("logout: the token no longer works", mEnv.call("me", {}, TT, 1).code === "AUTH_EXPIRED");
+    ok(mEnv.call("deleteUser", { id: uid }, MT, 1), "delete user");
+    check("user removed: not listed", !ok(mEnv.call("listUsers", {}, MT, 1), "users").some((u) => u.id === uid));
+    check("user removed: can't log in", !mEnv.call("login", { email: "temp.m@x.in", password: "secret1" }).success);
+    const catId = ok(mEnv.call("saveCategory", { name: "Temp Cat", default_hsn: "3303", default_gst: 18 }, MT, 1), "temp category").id;
+    ok(mEnv.call("deleteCategory", { id: catId }, MT, 1), "delete category");
+    check("category removed: not in the catalogue", !mEnv.call("getCatalog", {}, MT, 1).data.categories.some((c) => c.id === catId));
+    const catAny = mEnv.call("getCatalog", {}, MT, 1).data.categories[0].id;
+    ok(mEnv.call("saveProduct", { name: "Temp Product", category_id: catAny, gst_rate: 18, variants: [{ size_label: "5ml", mrp: 10, sell_price: 10, cost: 5, opening_stock: 3, barcode: "TMPDEL1" }] }, MT, 1), "temp product");
+    const tp = mEnv.call("getCatalog", {}, MT, 1).data.variants.find((v) => v.barcode === "TMPDEL1");
+    ok(mEnv.call("deleteProduct", { id: tp.product_id }, MT, 1), "delete product");
+    const catAfter = mEnv.call("getCatalog", {}, MT, 1).data;
+    check("product removed: not in the catalogue", !catAfter.variants.some((v) => v.barcode === "TMPDEL1") && !catAfter.products.some((p) => p.id === tp.product_id));
+    const newP = ok(mEnv.call("saveProduct", { name: "Next Product", category_id: catAny, gst_rate: 18, variants: [{ size_label: "5ml", mrp: 10, sell_price: 10, cost: 5, opening_stock: 1, barcode: "TMPNEXT" }] }, MT, 1), "product after a delete");
+    const nv = mEnv.call("getCatalog", {}, MT, 1).data.variants.find((v) => v.barcode === "TMPNEXT");
+    check("after deletes, a new product gets its own stock", nv && nv.stock_qty === 1, nv);
+    const grown = Object.entries(sizes()).filter(([n, s]) => s !== sizeNow[n]);
+    check("no sheet changed size during all of the above", grown.length === 0, grown);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

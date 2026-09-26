@@ -345,6 +345,11 @@ function savePendingInvoicePdfs() {
     } catch (e) {
         console.error("ensureBackupTrigger_", e);
     }
+    try {
+        ensureMaintenanceTrigger_(); // and the nightly spare-rows top-up (maintenance.gs)
+    } catch (e) {
+        console.error("ensureMaintenanceTrigger_", e);
+    }
     if (setting_("invoice_pdfs") === "no") return;
     const started = Date.now();
     const inTime = () => Date.now() - started < 4 * 60 * 1000; // Apps Script stops at 6 min; the next run continues

@@ -385,13 +385,8 @@ function apiDeleteProduct_(p, ctx) {
         const held = rows_("Held_Bills").some((h) => ((h.cart_json && h.cart_json.lines) || []).some((l) => vids[l.variant_id]));
         if (held) fail_("This product is in a held bill — finish or delete that bill first.");
 
-        // bottom-up so row numbers stay valid
-        const drop = (name, rows) => {
-            if (!rows.length) return;
-            const sh = readTable_(name).sh;
-            rows.sort((a, b) => b._r - a._r).forEach((r) => sh.deleteRow(r._r));
-            forgetTable_(name);
-        };
+        // rows are emptied, not deleted, so nothing moves while others are saving (see deleteRow_)
+        const drop = (name, rows) => emptyRows_(name, rows.map((r) => r._r));
         drop("Stock_Movements", rows_("Stock_Movements").filter((m) => vids[m.variant_id]));
         drop("Branch_Stock", rows_("Branch_Stock").filter((b) => vids[b.variant_id]));
         drop("Variants", variants);

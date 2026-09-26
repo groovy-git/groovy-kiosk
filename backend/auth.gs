@@ -109,11 +109,8 @@ function endSession_(token) {
 function endUserSessions_(userId, exceptToken) {
     const cache = CacheService.getScriptCache();
     const rows = rows_("Sessions").filter((s) => s.user_id === userId && s.token !== exceptToken);
-    rows.sort((a, b) => b._r - a._r).forEach((s) => {
-        cache.remove("s_" + s.token);
-        readTable_("Sessions").sh.deleteRow(s._r);
-    });
-    forgetTable_("Sessions");
+    rows.forEach((s) => cache.remove("s_" + s.token));
+    emptyRows_("Sessions", rows.map((s) => s._r)); // emptied, not deleted — see deleteRow_
 }
 
 /* ---------- public actions ---------- */
@@ -138,11 +135,7 @@ function apiLogin_(p) {
 
     const token = withLock_(() => {
         const now = nowStr_();
-        rows_("Sessions")
-            .filter((x) => x.user_id === u.id && x.expires_at < now)
-            .sort((a, b) => b._r - a._r)
-            .forEach((x) => readTable_("Sessions").sh.deleteRow(x._r));
-        forgetTable_("Sessions");
+        emptyRows_("Sessions", rows_("Sessions").filter((x) => x.user_id === u.id && x.expires_at < now).map((x) => x._r));
         const t = createSession_(u, p.device);
         log_({ user: u }, "LOGIN", "Users", u.id, "");
         return t;

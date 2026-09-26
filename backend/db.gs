@@ -318,9 +318,18 @@ function formatTextCols_(sh, name, startRow, numRows) {
     textColRuns_(name).forEach(([c, len]) => sh.getRange(startRow, c, numRows, len).setNumberFormat("@"));
 }
 
-function ensureRows_(sh, needLast) {
-    const max = sh.getMaxRows();
-    if (needLast > max) sh.insertRowsAfter(max, needLast - max + 200);
+/**
+ * Room for n more rows under the last row that has data.
+ *
+ * New rows go right under that last data row, never after the sheet's reported size: while someone else
+ * is saving, getMaxRows() can still give the size from before their save grew the sheet, and inserting
+ * after that old size put blank rows in the middle of fresh data — rows were pushed down, ids repeated
+ * and the sheet ballooned. getLastRow() is always current, so inserting there can't split anything.
+ * Normally this never runs: the night keeps spare rows ready (maintenance.gs). If a sheet does run out
+ * during the day it gets a full stock at once, so it is a once-in-weeks event, not every few rows.
+ */
+function ensureRows_(sh, lastRow, n) {
+    if (lastRow + n > sh.getMaxRows()) sh.insertRowsAfter(Math.max(lastRow, 1), n + SPARE_ROWS_);
 }
 
 /**
@@ -333,8 +342,9 @@ function appendRows_(name, objs) {
     const cached = REQ_CACHE_[name] || null;
     const sh = cached ? cached.sh : sheet_(name);
     const keys = cached ? cached.keys : cols_(name);
-    const start = sh.getLastRow() + 1;
-    ensureRows_(sh, start + objs.length - 1);
+    const lastRow = sh.getLastRow();
+    const start = lastRow + 1;
+    ensureRows_(sh, lastRow, objs.length);
     formatTextCols_(sh, name, start, objs.length);
     sh.getRange(start, 1, objs.length, keys.length).setValues(objs.map((o) => rowArray_(name, o)));
     if (!cached) return; // nothing cached to keep in step; a later read picks the rows up
@@ -460,10 +470,23 @@ function writeColumn_(name, records, field) {
     flush();
 }
 
+/**
+ * Remove a record: its row is emptied, not deleted. Deleting a row changes the sheet's size, and while
+ * someone else is saving Google can show them the sheet as it was before (see maintenance.gs) — they
+ * would then write into a row that had moved. An empty row is skipped by every read (rowsFromValues_),
+ * so the record is gone all the same, and nothing below it moves.
+ */
 function deleteRow_(name, obj) {
-    const t = readTable_(name);
-    t.sh.deleteRow(obj._r);
-    forgetTable_(name); // row numbers shifted
+    emptyRows_(name, [obj._r]);
+}
+
+/** Empty these sheet rows (1-based) of a table in place. */
+function emptyRows_(name, rowNums) {
+    if (!rowNums.length) return;
+    const sh = sheet_(name);
+    const width = cols_(name).length;
+    rowNums.forEach((r) => sh.getRange(r, 1, 1, width).clearContent());
+    forgetTable_(name);
 }
 
 function withLock_(fn) {
