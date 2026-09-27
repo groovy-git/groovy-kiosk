@@ -7,7 +7,7 @@ import { newClientRef } from "../../lib/cart";
 import { inr, r2, METHOD_LABEL } from "../../lib/format";
 import { Button, Field, MoneyInput, Seg, Sheet, Spinner } from "../../components/ui";
 
-const METHODS = ["cash", "upi", "card"];
+const METHODS = ["upi", "cash", "card"]; // UPI first: most customers pay that way
 
 export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   const { cart, setCart, clearCart, sellers, user, role, settings, toast, patchStock, catalog, online } = useApp();
@@ -18,9 +18,9 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   const credit = swap ? r2(swap.credit) : 0;
   const due = r2(Math.max(0, total - credit)); // what the customer still pays
   const back = r2(Math.max(0, credit - total)); // what goes back to them, if the replacement is cheaper
-  const [backMethod, setBackMethod] = useState("cash");
+  const [backMethod, setBackMethod] = useState("upi");
   // payment rows; `auto` rows follow the bill total until the user types an amount
-  const [pays, setPays] = useState(() => [{ method: "cash", amount: String(due), reference: "", auto: true }]);
+  const [pays, setPays] = useState(() => [{ method: "upi", amount: String(due), reference: "", auto: true }]);
   const [known, setKnown] = useState(null);
   const [lookup, setLookup] = useState("idle"); // idle | loading | found | new
   const autoFill = useRef({ name: "", gstin: "" }); // values filled from the customer lookup
@@ -34,7 +34,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
 
   useEffect(() => {
     if (!open) return;
-    setPays([{ method: "cash", amount: String(due), reference: "", auto: true }]);
+    setPays([{ method: "upi", amount: String(due), reference: "", auto: true }]);
     setDiscText(cart.bill_disc ? String(cart.bill_disc) : "");
     setDiscMode("rs");
     setShowGstin(!!cust.gstin);
@@ -49,10 +49,18 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
     setCart((c) => ({ ...c, bill_disc: rs }));
   };
 
-  // keep an untouched single payment equal to the total (e.g. after a bill discount)
+  // an untouched first payment takes whatever the other rows leave of the bill
+  const balance = (ps) => {
+    if (!ps.length || !ps[0].auto) return ps;
+    const others = ps.slice(1).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+    const amount = String(Math.max(0, r2(due - others)));
+    return ps[0].amount === amount ? ps : [{ ...ps[0], amount }, ...ps.slice(1)];
+  };
+
+  // keep it balanced when the total moves (e.g. after a bill discount)
   useEffect(() => {
-    setPays((ps) => (ps.length === 1 && ps[0].auto && ps[0].amount !== String(due) ? [{ ...ps[0], amount: String(due) }] : ps));
-  }, [total, due]);
+    setPays(balance);
+  }, [total, due]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // returning customer lookup by phone → pre-fill name (and GSTIN)
   useEffect(() => {
@@ -98,13 +106,15 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   const nonCashOver = r2(tendered - cash) > due;
   const canPay = total >= 0 && short <= 0 && change <= cash && !nonCashOver;
 
-  const setPay = (i, patch) => setPays((ps) => ps.map((p, j) => (j === i ? { ...p, ...patch } : p)));
+  const setPay = (i, patch) => setPays((ps) => balance(ps.map((p, j) => (j === i ? { ...p, ...patch } : p))));
+  const removePay = (i) => setPays((ps) => balance(ps.filter((_, j) => j !== i)));
+  // a new row starts empty unless the rows above leave something unpaid
   const addSplit = () =>
     setPays((ps) => {
-      const first = ps.map((p) => ({ ...p, auto: false }));
-      const paid = first.reduce((s, p) => s + (Number(p.amount) || 0), 0);
-      const used = new Set(first.map((p) => p.method));
-      return [...first, { method: METHODS.find((m) => !used.has(m)) || "upi", amount: String(Math.max(0, r2(due - paid))), reference: "", auto: false }];
+      const paid = ps.reduce((s, p) => s + (Number(p.amount) || 0), 0);
+      const left = r2(due - paid);
+      const used = new Set(ps.map((p) => p.method));
+      return [...ps, { method: METHODS.find((m) => !used.has(m)) || "upi", amount: left > 0 ? String(left) : "", reference: "", auto: false }];
     });
 
   const complete = async () => {
@@ -152,8 +162,6 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
       setBusy(false);
     }
   };
-
-  const quickCash = [due, Math.ceil(due / 100) * 100, Math.ceil(due / 500) * 500, Math.ceil(due / 2000) * 2000]
 
   return (
     <Sheet
@@ -320,7 +328,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
               <Seg value={p.method} onChange={(m) => setPay(i, { method: m })} options={METHODS.map((m) => ({ value: m, label: METHOD_LABEL[m] }))} />
             </div>
             {pays.length > 1 && (
-              <button className="icon-btn" onClick={() => setPays((ps) => ps.filter((_, j) => j !== i))} aria-label="Remove payment">
+              <button className="icon-btn" onClick={() => removePay(i)} aria-label="Remove payment">
                 <X size={20} />
               </button>
             )}
@@ -335,15 +343,6 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
               />
             </div>
           </div>
-          {p.method === "cash" && pays.length === 1 && (
-            <div className="chips mt">
-              {quickCash.map((v) => (
-                <button key={v} className={"chip" + (Number(p.amount) === v ? " active" : "")} onClick={() => setPay(i, { amount: String(v), auto: v === due })}>
-                  {v === due ? "Exact" : inr(v)}
-                </button>
-              ))}
-            </div>
-          )}
           {p.method !== "cash" && (
             <input
               className="input mt"

@@ -258,6 +258,11 @@ export function MoneyInput({ value, onChange, placeholder = "0", ...rest }) {
         placeholder={placeholder}
         onChange={(e) => onChange(e.target.value.replace(/[^\d.]/g, ""))}
         {...rest}
+        // select what's there so typing replaces a pre-filled amount instead of appending to it
+        onFocus={(e) => {
+          e.target.select();
+          rest.onFocus?.(e);
+        }}
       />
     </div>
   );
