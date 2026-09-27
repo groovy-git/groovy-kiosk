@@ -96,6 +96,28 @@ function usePreloadScreens(ready) {
   }, [ready]);
 }
 
+// iPhone home-screen app: at launch, and after the login keyboard closes, iOS can think the screen is
+// shorter than it is, leaving a strip under the bottom tabs until something makes it measure again.
+// A scroll to the top (where a fresh screen already is) is that something.
+function useIosViewportNudge(shown) {
+  useEffect(() => {
+    if (!shown) return;
+    const nudge = () => requestAnimationFrame(() => window.scrollTo(0, 0));
+    nudge();
+    const vv = window.visualViewport;
+    if (!vv) return;
+    let last = vv.height;
+    const onResize = () => {
+      const grew = vv.height > last;
+      last = vv.height;
+      // keyboard just closed, nothing is being typed into, and the page is at the top anyway
+      if (grew && window.scrollY === 0 && !/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName || "")) nudge();
+    };
+    vv.addEventListener("resize", onResize);
+    return () => vv.removeEventListener("resize", onResize);
+  }, [shown]);
+}
+
 // same frame as a real screen (title bar + rows) so a screen being fetched never looks blank
 function PageLoading() {
   return (
@@ -171,6 +193,7 @@ export default function App() {
   const route = useRoute();
   usePreloadScreens(!!user && !!rawCatalog);
   useHomeWhenLoggedOut(!user);
+  useIosViewportNudge(!!user && !(booting && !rawCatalog));
 
   if (!user) return (<><Login /><Toasts /><BusyOverlay /></>);
   if (booting && !rawCatalog)
