@@ -75,6 +75,10 @@ export async function api(action, payload = {}) {
         } catch {
           json = null; // Google's HTML error page (e.g. 404 on the echo redirect)
         }
+        // "success" without a `data` field isn't an answer to this action: it is the web app's GET page,
+        // which Google now and then serves for a POST (seen in the multi-user stress test). The action
+        // didn't run — treat it like a lost reply and ask again with the same req_id.
+        if (json && json.success && !("data" in json)) json = null;
       } finally {
         clearTimeout(timer);
       }
