@@ -408,7 +408,8 @@ function setupSheets() {
         (created.length ? "\nCreated sheets: " + created.join(", ") : "\nAll sheets already existed.") +
         (kept.length ? "\nKept your extra columns in: " + kept.join(", ") + " (no data was removed)." : "") +
         adminMsg +
-        pdfTimerMsg_();
+        pdfTimerMsg_() +
+        nightlyTimerMsg_();
     alert_(msg);
     return msg;
 }
@@ -548,6 +549,20 @@ function seedDemo() {
     exp.forEach((e, i) => apiSaveExpense_({ category: e[0], title: e[1], amount: e[2], method: "cash", date: daysAgoStr_(e[3]) }, Object.assign({}, ctx, { branch_id: i % 2 ? kn : 1 })));
 
     alert_("Demo data loaded: 2 branches (Kondhwa, Kalyani Nagar), " + demo.length + " products, " + n + " bills, 3 staff users (password demo1234).");
+}
+
+// (re)installs the nightly day-close email timer as Settings say (on/off, hour). A timer runs the code
+// version that made it: saved from the app it is tied to the app's deployment (e.g. "Version 31") and
+// would keep running that old code after an update; made here, from the sheet menu, it runs the latest.
+function nightlyTimerMsg_() {
+    try {
+        if (!syncNightlyTrigger_()) return "";
+        const h = Math.min(23, Math.max(0, parseInt(setting_("nightly_report_hour"), 10) || 22));
+        return "\nNightly email: scheduled for " + hourLabel_(h) + " – " + hourLabel_((h + 1) % 24) + ".";
+    } catch (e) {
+        console.error("syncNightlyTrigger_", e);
+        return "\nNightly email timer could not be set up: " + e;
+    }
 }
 
 // (re)installs the nightly invoice-PDF timer; Setup is the place where Google asks for permission

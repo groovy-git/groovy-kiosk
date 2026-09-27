@@ -276,6 +276,14 @@ check("one trigger at 22:00 IST", nightlyTriggers().length === 1 && nightlyTrigg
 check("emails normalised", call("getSettings", {}, T).data.report_emails === "owner@x.in, accountant@x.in");
 ok(call("saveSettings", { settings: { nightly_report_hour: "21" } }, T), "change hour");
 check("still one trigger, new hour", nightlyTriggers().length === 1 && nightlyTriggers()[0].hour === 21);
+// Setup recreates it too — made from the sheet menu, the timer runs the latest code, not the app's version
+const otherTimers = () => JSON.stringify(env.triggers.filter((x) => x.fn !== "sendNightlyReport").map((x) => [x.fn, x.days, x.hour, x.minutes, x.monthDay]).sort());
+const timersBefore = otherTimers();
+env.alerts.length = 0;
+ctx.setupSheets();
+check("Setup re-makes the nightly email timer: one, same hour, IST", nightlyTriggers().length === 1 && nightlyTriggers()[0].hour === 21 && nightlyTriggers()[0].tz === "Asia/Kolkata", nightlyTriggers());
+check("Setup says when the nightly email goes out", env.alerts.some((a) => /Nightly email: scheduled for 9 PM – 10 PM/.test(a)), env.alerts);
+check("Setup leaves the other timers as they were", otherTimers() === timersBefore, { before: timersBefore, after: otherTimers() });
 env.mails.length = 0;
 check("nightly sends when on", /: sent$/.test(ctx.sendNightlyReport()) && env.mails.length === 1 && env.mails[0].to === "owner@x.in,accountant@x.in");
 const offRes = call("saveSettings", { settings: { nightly_report: "no" } }, T);
@@ -283,6 +291,9 @@ check("turn nightly off", offRes.success && /OFF/.test(offRes.message), offRes.m
 check("trigger removed when off", nightlyTriggers().length === 0);
 check("nightly does nothing when off", ctx.sendNightlyReport() === "disabled" && env.mails.length === 1);
 check("unrelated save keeps trigger state", ok(call("saveSettings", { settings: { tagline: "Smell Of Perfection" } }, T), "unrelated save") !== undefined && nightlyTriggers().length === 0);
+env.alerts.length = 0;
+ctx.setupSheets();
+check("Setup with nightly email off: no timer, no message", nightlyTriggers().length === 0 && !env.alerts.some((a) => /Nightly email/.test(a)));
 
 // ---- held bills, customers, logs ----
 const held = ok(call("holdBill", { label: "Rahul", cart: { lines: [{ variant_id: vAsad.id, qty: 1 }] } }, S1), "hold");
