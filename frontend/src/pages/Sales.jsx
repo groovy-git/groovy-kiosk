@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { useCachedFetch } from "../lib/cached";
 import { navigate } from "../lib/router";
 import { inr, istDate, monthStart, fmtTime, relDay, METHOD_LABEL } from "../lib/format";
-import TopBar from "../components/TopBar";
+import TopBar, { Updating } from "../components/TopBar";
 import { Chips, DateField, Empty, SearchBar, SkeletonList } from "../components/ui";
 
 const PRESETS = [
@@ -64,7 +64,7 @@ export default function Sales() {
 
   return (
     <>
-      <TopBar title={isManager ? "Sales" : "My Sales"} right={loading && data ? <span className="tiny muted">updating…</span> : null} />
+      <TopBar title={isManager ? "Sales" : "My Sales"} right={loading && data ? <Updating /> : null} />
       <div className="page">
         <Chips options={PRESETS} value={f.preset} onChange={(p) => setFilter({ preset: p })} />
         {f.preset === "custom" && (

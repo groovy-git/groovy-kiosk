@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { useCachedFetch } from "../lib/cached";
 import { runBusy } from "../lib/busy";
 import { ROLE_LABEL } from "../lib/format";
-import TopBar from "../components/TopBar";
+import TopBar, { Updating } from "../components/TopBar";
 import { Avatar, Button, Empty, Field, Seg, Sheet, SkeletonList, useConfirm } from "../components/ui";
 
 const ROLE_ORDER = { owner: 0, admin: 0, manager: 1, salesperson: 2 };
@@ -44,7 +44,7 @@ export default function UsersPage() {
 
   return (
     <>
-      <TopBar title="Staff" back="more" right={loading && list ? <span className="tiny muted">updating…</span> : null} />
+      <TopBar title="Staff" back="more" right={loading && list ? <Updating /> : null} />
       <div className="page">
         <p className="small muted" style={{ marginTop: 0 }}>
           Everyone can sell. Managers also handle stock, returns, expenses and reports. Only the owner manages staff and settings.

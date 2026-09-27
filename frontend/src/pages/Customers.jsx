@@ -6,7 +6,7 @@ import { useCachedFetch } from "../lib/cached";
 import { runBusy } from "../lib/busy";
 import { navigate } from "../lib/router";
 import { inr, relDay, fmtDateTime } from "../lib/format";
-import TopBar from "../components/TopBar";
+import TopBar, { Updating } from "../components/TopBar";
 import { Avatar, Button, Empty, Field, SearchBar, Sheet, SkeletonList } from "../components/ui";
 import { STATUS } from "./Sales";
 
@@ -32,7 +32,7 @@ export default function Customers() {
 
   return (
     <>
-      <TopBar title="Customers" back="more" right={loading && list ? <span className="tiny muted">updating…</span> : null} />
+      <TopBar title="Customers" back="more" right={loading && list ? <Updating /> : null} />
       <div className="page">
         <SearchBar value={typed} onChange={setTyped} placeholder="Name or mobile number" />
         {!list ? (

@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { useCachedFetch } from "../lib/cached";
 import { inr, istDate, monthStart, fmtDate, fmtDateTime, METHOD_LABEL, r2, plural } from "../lib/format";
 import { toCSV, downloadText } from "../lib/files";
-import TopBar from "../components/TopBar";
+import TopBar, { Updating } from "../components/TopBar";
 import { Button, Chips, DateField, Seg, SkeletonList } from "../components/ui";
 
 const TYPES = [
@@ -48,7 +48,7 @@ export default function Reports() {
   const needsRange = !["day_close", "stock_valuation"].includes(type);
   return (
     <>
-      <TopBar title="Reports" back="more" right={loading && data ? <span className="tiny muted">updating…</span> : null} />
+      <TopBar title="Reports" back="more" right={loading && data ? <Updating /> : null} />
       <div className="page">
         <Chips value={type} onChange={setType} options={types} />
         {type === "day_close" && (

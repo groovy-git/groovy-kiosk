@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { useCachedFetch } from "../lib/cached";
 import { runBusy } from "../lib/busy";
 import { inr, istDate, monthStart, relDay, METHOD_LABEL } from "../lib/format";
-import TopBar from "../components/TopBar";
+import TopBar, { Updating } from "../components/TopBar";
 import { Button, Chips, DateField, Empty, Field, MoneyInput, Seg, Sheet, SkeletonList, useConfirm } from "../components/ui";
 
 function lastMonth() {
@@ -32,7 +32,7 @@ export default function Expenses() {
 
   return (
     <>
-      <TopBar title="Expenses" back="more" right={loading && data ? <span className="tiny muted">updating…</span> : null} />
+      <TopBar title="Expenses" back="more" right={loading && data ? <Updating /> : null} />
       <div className="page">
         <Chips
           value={preset}

@@ -4,7 +4,7 @@ import { useApp } from "../store";
 import { api } from "../lib/api";
 import { useCachedFetch } from "../lib/cached";
 import { fmtDateTime } from "../lib/format";
-import TopBar from "../components/TopBar";
+import TopBar, { Updating } from "../components/TopBar";
 import { Empty, SearchBar, SkeletonList } from "../components/ui";
 
 export default function Logs() {
@@ -24,7 +24,7 @@ export default function Logs() {
   );
   return (
     <>
-      <TopBar title="Activity log" back="more" right={loading && list ? <span className="tiny muted">updating…</span> : null} />
+      <TopBar title="Activity log" back="more" right={loading && list ? <Updating /> : null} />
       <div className="page">
         <SearchBar value={typed} onChange={setTyped} placeholder="Search name, action, bill no" />
         {!list ? (
