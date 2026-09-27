@@ -33,7 +33,11 @@ const toIso = (v) => {
 // the sheet keeps whole seconds, so the run starts at the start of its first second (nothing that moves
 // stock or money is written in the second before the run: that is only logins and the new test staff)
 const startedSec = new Date(Math.floor(new Date(started).getTime() / 1000) * 1000).toISOString();
-const inRun = (v) => { const t = toIso(v); return !!t && t >= startedSec; };
+// NEXT_RUN=<next run's out dir>: check an earlier run in a copy that has had another run since — rows up to
+// that run's start, and its starting stock as this run's end
+const next = process.env.NEXT_RUN ? JSON.parse(fs.readFileSync(path.join(process.env.NEXT_RUN, "snapshot.json"), "utf8")) : null;
+const endedSec = next ? next.snapshot.started : "9999";
+const inRun = (v) => { const t = toIso(v); return !!t && t >= startedSec && t < endedSec; };
 const r3 = (x) => Math.round((Number(x) + Number.EPSILON) * 1000) / 1000;
 const r2 = (x) => Math.round((Number(x) + Number.EPSILON) * 100) / 100;
 
@@ -67,7 +71,8 @@ Object.entries(snap.snapshot.stockAll.by_branch || {}).forEach(([vid, byB]) => O
 const moved = {};
 T.Stock_Movements.filter((m) => inRun(m.at)).forEach((m) => { const k = m.variant_id + "|" + m.branch_id; moved[k] = r3((moved[k] || 0) + Number(m.qty)); });
 const end = {};
-T.Branch_Stock.forEach((r) => (end[r.variant_id + "|" + r.branch_id] = r3((end[r.variant_id + "|" + r.branch_id] || 0) + Number(r.qty))));
+if (next) Object.entries(next.snapshot.stockAll.by_branch || {}).forEach(([vid, byB]) => Object.entries(byB).forEach(([bid, q]) => (end[vid + "|" + bid] = Number(q))));
+else T.Branch_Stock.forEach((r) => (end[r.variant_id + "|" + r.branch_id] = r3((end[r.variant_id + "|" + r.branch_id] || 0) + Number(r.qty))));
 const stockBad = Object.keys(moved).filter((k) => r3((start[k] || 0) + moved[k]) !== r3(end[k] || 0)).map((k) => ({ item_branch: k, start: start[k] || 0, moved: moved[k], end: end[k] || 0 }));
 check(`stock = start + movements (${Object.keys(moved).length} item/branch pairs moved)`, stockBad.length === 0, stockBad.slice(0, 10));
 const lastBal = {};
@@ -82,7 +87,9 @@ const neg = T.Branch_Stock.filter((r) => Number(r.qty) < 0).map((r) => [r.varian
 check("no negative stock", neg.length === 0, neg.slice(0, 10));
 
 // 3. every save in the log written exactly once, nothing extra
-const ok = (a) => log.filter((e) => e.action === a && e.success && e.at >= startedSec); // the run's, not setup's (opening stock-ins)
+// with NEXT_RUN, that run's setup (opening stock-ins, new staff) happened inside this run's window too
+const setupOfNext = next ? fs.readFileSync(path.join(process.env.NEXT_RUN, "requests.jsonl"), "utf8").trim().split(/\r?\n/).map((l) => JSON.parse(l)).filter((e) => e.at < endedSec) : [];
+const ok = (a) => log.concat(setupOfNext).filter((e) => e.action === a && e.success && e.at >= startedSec && e.at < endedSec); // the run's, not setup's (opening stock-ins)
 const runSales = T.Sales.filter((s) => inRun(s.date));
 const loggedSaleIds = new Set([...ok("completeSale"), ...ok("exchange")].map((e) => e.data && e.data.sale && e.data.sale.id).filter(Boolean));
 check("every sale in the log is in the sheet", [...loggedSaleIds].every((id) => T.Sales.some((s) => Number(s.id) === id)), [...loggedSaleIds].filter((id) => !T.Sales.some((s) => Number(s.id) === id)));

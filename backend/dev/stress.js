@@ -38,6 +38,8 @@ fs.writeFileSync(logFile, "");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const rnd = (n) => Math.floor(Math.random() * n);
 const pick = (a) => a[rnd(a.length)];
+const odd = []; // replies that said success but weren't API answers
+process.on("exit", () => { if (odd.length) fs.writeFileSync(path.join(OUT, "odd-replies.json"), JSON.stringify(odd, null, 1)); });
 const istDay = (d) => new Date((d ? new Date(d) : new Date()).getTime() + 5.5 * 3600000).toISOString().slice(0, 10);
 
 // one call to the server, logged; retries a lost reply with the same req_id, like the app
@@ -50,7 +52,7 @@ async function call(who, action, payload, token, branch, reqId) {
         try {
             const r = await fetch(URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify({ action, token, branch_id: branch || 0, req_id, payload }), redirect: "follow" });
             const txt = await r.text();
-            try { res = JSON.parse(txt); err = null; } catch (e) { res = null; err = "not JSON (HTTP " + r.status + "): " + txt.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 120); }
+            try { res = JSON.parse(txt); err = null; if (res && res.success && !("data" in res)) { odd.push({ action, at: new Date().toISOString(), status: r.status, url: r.url.slice(0, 80), raw: txt.slice(0, 300) }); res = null; err = "reply without data (not an API answer): " + txt.slice(0, 100); } } catch (e) { res = null; err = "not JSON (HTTP " + r.status + "): " + txt.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 120); }
             if (res && res.code === "IN_PROGRESS") { await sleep(1500); continue; }
             if (res) break;
         } catch (e) { err = String(e); }
@@ -99,8 +101,9 @@ async function call(who, action, payload, token, branch, reqId) {
         const email = `stress.${name.toLowerCase().replace(/\W/g, "")}.${stamp}@example.com`;
         const s = await call("owner", "saveUser", { name: "Stress " + name, email, role, password: "stress123", branch_id: b.id, branch_ids: role === "owner" ? [] : [b.id] }, T, b.id);
         if (!s.success) throw new Error("create user failed: " + s.message);
-        const l = await call(name, "login", { email, password: "stress123", device: "stress test" });
-        if (!l.success) throw new Error("login failed for " + name + ": " + l.message);
+        let l;
+        for (let i = 0; i < 5; i++) { l = await call(name, "login", { email, password: "stress123", device: "stress test" }); if (l.success && l.data && l.data.token) break; await sleep(2000); }
+        if (!l.success || !l.data || !l.data.token) throw new Error("login failed for " + name + ": " + (l.message || l.err));
         return { name, role, email, id: s.data.id, token: l.data.token, branch: b.id };
     };
     const teams = [];
@@ -152,9 +155,11 @@ async function call(who, action, payload, token, branch, reqId) {
             else if (x < 0.8) { const id = mine.shift(); if (id) tally("saleFromHeld:" + (await sale(u, team, { held_id: id })).success); }
             else if (x < 0.83) { // log out and in again (a session row is emptied, another written)
                 await call(u.name, "logout", {}, u.token, team.b.id);
-                const l = await call(u.name, "login", { email: u.email, password: "stress123", device: "stress test" });
+                let l; // like a person: try again until the login goes through
+                for (let i = 0; i < 10; i++) { l = await call(u.name, "login", { email: u.email, password: "stress123", device: "stress test" }); if (l.success) break; await sleep(2000 + rnd(3000)); }
                 if (l.success) u.token = l.data.token;
                 tally("relogin:" + l.success);
+                tally("relogin tries:" + (l.success ? "ok" : "gave up"));
             }
             else { const b = bills.filter((b) => b.by === u.name && b.items && b.items.length).pop(); if (b) tally("return:" + (await call(u.name, "returnItems", { sale_id: b.id, items: [{ sale_item_id: b.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "stress" }, u.token, team.b.id)).success); }
         }
