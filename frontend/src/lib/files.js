@@ -94,11 +94,19 @@ const GENDER = { female: "women", women: "women", woman: "women", male: "men", m
  * Maps website rows onto our import fields. Only what the shop uses is taken (price, MRP, size, barcode, SKU,
  * GST, brand, gender, HSN, first image, quantity); descriptions, SEO and the rest are left out.
  * The category is guessed (attar → Packed Attar, otherwise Eau De Parfum) and used only for NEW products.
+ * Only rows marked On_Kiosk = yes are for the shop; the rest are left out quietly (counted in notKiosk).
+ * A file without that column imports nothing, so products not meant for the kiosk can't slip in.
  */
 export function fromWebsiteExport(rows) {
+  if (!rows.length || !("on_kiosk" in rows[0])) return { rows: [], skipped: [], notKiosk: 0, noKioskColumn: true };
   const out = [];
   const skipped = [];
+  let notKiosk = 0;
   rows.forEach((r, i) => {
+    if (String(r.on_kiosk || "").trim().toLowerCase() !== "yes") {
+      notKiosk++;
+      return;
+    }
     if (String(r.sale_price_tax_included).toLowerCase() === "false") {
       skipped.push({ row: i + 2, message: `${r.name || "Row"} ${r.size || ""}: sale price without tax isn't supported — fix it on the website or add it by hand` });
       return;
@@ -130,5 +138,5 @@ export function fromWebsiteExport(rows) {
       new_category: /attar/i.test(tags) ? "Packed Attar" : "Eau De Parfum",
     });
   });
-  return { rows: out, skipped };
+  return { rows: out, skipped, notKiosk };
 }

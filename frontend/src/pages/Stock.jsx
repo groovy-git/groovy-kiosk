@@ -349,7 +349,7 @@ function ImportSheet({ open, onClose }) {
       if (isWebsiteExport(parsed)) {
         const m = fromWebsiteExport(parsed);
         setRows(m.rows);
-        setWebsite({ skipped: m.skipped });
+        setWebsite({ skipped: m.skipped, notKiosk: m.notKiosk, noKioskColumn: !!m.noKioskColumn });
       } else {
         setRows(parsed);
         setWebsite(null);
@@ -391,7 +391,8 @@ function ImportSheet({ open, onClose }) {
         Uploading again is safe: existing sizes (same barcode, or same brand + product + size) get their prices updated — blank cells keep the current value — and are
         never duplicated. Opening stock is only used for new sizes; use Stock In for more stock.
         <br />
-        You can also upload the product export from your website as it is — its columns are matched automatically, and SKU or barcode finds existing items. A row with no
+        You can also upload the product export from your website as it is — its columns are matched automatically, and SKU or barcode finds existing items. Only rows with
+        On_Kiosk = yes are imported; the others are left out. A row with no
         barcode gets its Product Id as one, so the item can still be scanned, and a row with no minimum quantity gets a reorder level of 2 so it still
         warns when stock runs low. Anything already saved here — a barcode, a reorder level you set — is never replaced.
       </p>
@@ -404,9 +405,17 @@ function ImportSheet({ open, onClose }) {
       </div>
       {rows && !result && (
         <div className="card">
-          {website && (
+          {website && website.noKioskColumn && (
+            <div className="bad-text small mb" style={{ fontWeight: 700 }}>
+              This website file has no On_Kiosk column — export it again with On_Kiosk filled in. Nothing will be imported.
+            </div>
+          )}
+          {website && !website.noKioskColumn && (
             <div className="small mb" style={{ color: "var(--ok)", fontWeight: 700 }}>
               Website product export recognised — columns matched automatically.
+              <div className="muted" style={{ fontWeight: 400 }}>
+                Only On_Kiosk = yes: {rows.length} {rows.length === 1 ? "row" : "rows"} to import{website.notKiosk ? ", " + website.notKiosk + " not on kiosk ignored" : ""}.
+              </div>
             </div>
           )}
           <b>{rows.length} rows found.</b>
