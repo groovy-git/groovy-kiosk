@@ -292,13 +292,24 @@ function creditNoteHtml_(r) {
 
 /* ---------- saving ---------- */
 
+// records a just-made PDF under the lock; if the lock can't be had ("Server busy" — nothing was written),
+// the file is binned rather than left in Drive with nothing pointing at it; the next try makes it again
+function linkPdf_(url, fn) {
+    try {
+        return withLock_(fn);
+    } catch (e) {
+        if (e && e.isAppError) trashPdf_(url);
+        throw e;
+    }
+}
+
 // builds the PDF outside the lock (it takes a couple of seconds), then records it under a short lock
 // `pre`: the bill's lines, payments and returns when the caller already has them (the night run)
 function savePdfForSale_(s, pre) {
     const voided = s.status === "voided";
     const url = makePdf_(invoicePdfHtml_(saleDetail_(s, null, pre)), pdfName_(s.invoice_no, voided), invoiceFolder_(s.date, isTaxInvoice_(s)));
     const stored = url + (voided ? PDF_VOID_MARK_ : "");
-    return withLock_(() => {
+    return linkPdf_(url, () => {
         // every checkout waits on this lock: look at the bill's own row, not the whole sheet
         const fresh = rowIfId_("Sales", s._r, s.id) || findBy_("Sales", "id", s.id);
         if (!fresh) return { pdf_url: "" };
@@ -317,7 +328,7 @@ function savePdfForReturn_(r) {
     const sale = findById_("Sales", r.sale_id);
     const gst = sale ? isTaxInvoice_(sale) : !!str_(setting_("gstin"));
     const url = makePdf_(creditNoteHtml_(r), pdfName_(r.credit_note_no, false), invoiceFolder_(r.at, gst));
-    withLock_(() => {
+    linkPdf_(url, () => {
         const fresh = rowIfId_("Returns", r._r, r.id) || findBy_("Returns", "id", r.id);
         if (!fresh) return;
         if (fresh.pdf_url) return trashPdf_(url);
@@ -427,6 +438,40 @@ function savePendingInvoicePdfs() {
             console.error("syncPdfTrigger_", e);
         }
     }
+    // one PDF run at a time: two runs working through the same bills each make a file for a bill, and
+    // Google can show the second run the bill row as it was before the first one linked its file (seen
+    // on the test copy: 79 extra files) — so the second run simply doesn't start
+    if (!claimPdfRun_()) return 0;
+    try {
+        return pdfBatch_();
+    } finally {
+        releasePdfRun_();
+    }
+}
+
+const PDF_RUN_KEY_ = "pdf_run_until";
+
+// the claim lives in Script Properties (not the sheet), taken under the lock so two starts can't both win;
+// it runs out on its own a little after Apps Script's 6-minute limit, so a run that was cut off can't block
+function claimPdfRun_() {
+    return withLock_(() => {
+        const props = PropertiesService.getScriptProperties();
+        if (Number(props.getProperty(PDF_RUN_KEY_) || 0) > Date.now()) return false;
+        props.setProperty(PDF_RUN_KEY_, String(Date.now() + 6.5 * 60 * 1000));
+        return true;
+    });
+}
+
+function releasePdfRun_() {
+    try {
+        PropertiesService.getScriptProperties().deleteProperty(PDF_RUN_KEY_);
+    } catch (e) {
+        console.error("releasePdfRun_", e);
+    }
+}
+
+/** One run's work: the pending bills and credit notes, oldest first, within the 4-minute budget. */
+function pdfBatch_() {
     const started = Date.now();
     const inTime = () => Date.now() - started < 4 * 60 * 1000; // Apps Script stops at 6 min; a follow-up run continues
     let done = 0;

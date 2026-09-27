@@ -987,6 +987,31 @@ check("long night: a follow-up run is booked a minute later", env.triggers.filte
 ctx.resumeInvoicePdfs();
 check("long night: the follow-up finishes and clears itself",
     vmRun(`resetReqCache_(); pendingPdfRows_("Sales", true).length`) === 0 && !env.triggers.some((x) => x.fn === "resumeInvoicePdfs"));
+// one PDF run at a time: while another run holds the claim, a second one does nothing at all
+check("no run left holding the claim", !env.props.has("pdf_run_until"));
+ok(call("completeSale", { client_ref: "pdf-one-run", lines: [{ variant_id: vBottle.id, qty: 1 }], payments: [{ method: "cash", amount: 50 }] }, T, 1), "bill for the one-run test");
+const oneRunFiles = pdfFiles().length;
+env.props.set("pdf_run_until", String(Date.now() + 5 * 60 * 1000)); // another run is working
+check("a second run while one is working does nothing", ctx.savePendingInvoicePdfs() === 0 && pdfFiles().length === oneRunFiles &&
+    vmRun(`resetReqCache_(); pendingPdfRows_("Sales", true).length`) === 1);
+env.props.set("pdf_run_until", String(Date.now() - 1000)); // that run was cut off long ago: its claim has run out
+check("an expired claim doesn't block", ctx.savePendingInvoicePdfs() === 1 && vmRun(`resetReqCache_(); pendingPdfRows_("Sales", true).length`) === 0);
+check("the claim is given back after the run", !env.props.has("pdf_run_until"));
+// the lock can't be had after the file was made ("Server busy"): the file is binned, the bill keeps no link
+const busySale = ok(call("completeSale", { client_ref: "pdf-busy", lines: [{ variant_id: vBottle.id, qty: 1 }], payments: [{ method: "cash", amount: 50 }] }, T, 1), "bill for the busy test").sale;
+const busyName = busySale.invoice_no.replace(/\//g, "-") + ".pdf";
+const busyErr = vmRun(`resetReqCache_(); (() => {
+    const realLock = LockService;
+    LockService = { getScriptLock: () => ({ tryLock: () => false, releaseLock: () => {} }) };
+    try { savePdfForSale_(findById_("Sales", ${busySale.id})); return "no error"; }
+    catch (e) { return e.message; }
+    finally { LockService = realLock; }
+})()`);
+check("busy after making the PDF: file binned, no link, error passed on", /busy/i.test(busyErr) &&
+    env.drive.files().some((f) => f.name === busyName && f.trashed) && !pdfFiles().some((f) => f.name === busyName) &&
+    !ok(call("getSale", { id: busySale.id }, T, 1), "busy bill").sale.pdf_url, busyErr);
+ctx.savePendingInvoicePdfs();
+check("busy bill gets its PDF on the next run", pdfFiles().filter((f) => f.name === busyName).length === 1 && !!ok(call("getSale", { id: busySale.id }, T, 1), "busy bill").sale.pdf_url);
 // a sheet still on the old 15-minute timer switches itself to the night run the first time it runs
 env.props.delete("pdf_schedule");
 env.triggers.splice(env.triggers.findIndex((x) => x.fn === "savePendingInvoicePdfs"), 1);
