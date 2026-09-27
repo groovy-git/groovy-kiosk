@@ -373,6 +373,15 @@ const rqR3 = call("getCatalog", {}, T, 1, "req-test-0007");
 check("a new read sees the change", qty(rqR3) === qty(rqR1) + 1, { first: qty(rqR1), fresh: qty(rqR3) });
 check("no req_id works as before", call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 1 }] }, T, 1).success && rqStock() === rq0 + 9);
 check("bad req_id ignored", call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 1 }] }, T, 1, "x").success && rqStock() === rq0 + 10);
+// a phone locked mid-save retries when it wakes, maybe much later: seen live-like in the stress test,
+// a transfer retried 3 hours on was saved twice because its reply was kept for only 10 minutes
+check("a save's reply is kept 6 hours, a read's 2 minutes", env.cacheTtl.get("rq_req-test-0001") === 21600 && env.cacheTtl.get("rq_req-test-0005") === 120,
+    { save: env.cacheTtl.get("rq_req-test-0001"), read: env.cacheTtl.get("rq_req-test-0005") });
+env.expireCache(11 * 60);
+const rqLate = call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 2, unit_cost: 40 }] }, T, 1, "req-test-0001");
+check("a retry 11 minutes later is not saved again", JSON.stringify(rqLate) === JSON.stringify(rqA) && rqStock() === rq0 + 10, { now: rqStock(), expected: rq0 + 10 });
+const rqRLate = call("getCatalog", {}, T, 1, "req-test-0005");
+check("a read retried 11 minutes later is answered fresh", qty(rqRLate) === rqStock(), { replayed: qty(rqRLate), now: rqStock() });
 
 // ---- CSV import ----
 const imp = ok(call("importCatalog", { rows: [

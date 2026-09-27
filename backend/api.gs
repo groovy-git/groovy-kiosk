@@ -132,8 +132,10 @@ function dispatchOnce_(req) {
     const res = dispatch_(req);
     try {
         const out = JSON.stringify(res);
-        // failures aren't kept, so a retry can try again; big replies can't be cached (100 KB limit)
-        if (res.success && out.length < 90000) cache.put(key, out, isRead ? 120 : 600);
+        // failures aren't kept, so a retry can try again; big replies can't be cached (100 KB limit).
+        // A save is remembered for 6 hours (the cache's limit): a phone locked mid-save can retry much
+        // later, and after 10 minutes that retry used to save a second time (seen: a transfer done twice).
+        if (res.success && out.length < 90000) cache.put(key, out, isRead ? 120 : 21600);
         else cache.remove(key);
     } catch (e) {
         cache.remove(key);

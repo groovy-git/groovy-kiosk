@@ -204,6 +204,9 @@ function createEnv() {
     const drive = createDrive();
     const props = new Map();
     const cache = new Map();
+    const cacheTtl = new Map(); // seconds each entry was kept for (Google's default is 600)
+    // time passing: drops what Google would have dropped after that many seconds
+    const expireCache = (sec) => [...cacheTtl].forEach(([k, ttl]) => { if (ttl <= sec) { cache.delete(k); cacheTtl.delete(k); } });
     const mails = [];
     const alerts = [];
     const triggers = [];
@@ -233,8 +236,8 @@ function createEnv() {
             getScriptCache: () => ({
                 get: (k) => (cache.has(k) ? cache.get(k) : null),
                 getAll: (keys) => { const o = {}; keys.forEach((k) => { if (cache.has(k)) o[k] = cache.get(k); }); return o; },
-                put: (k, v) => cache.set(k, v),
-                putAll: (map) => Object.keys(map).forEach((k) => cache.set(k, map[k])),
+                put: (k, v, ttl) => (cache.set(k, v), cacheTtl.set(k, ttl || 600)),
+                putAll: (map, ttl) => Object.keys(map).forEach((k) => (cache.set(k, map[k]), cacheTtl.set(k, ttl || 600))),
                 remove: (k) => cache.delete(k),
                 removeAll: (keys) => keys.forEach((k) => cache.delete(k)),
             }),
@@ -284,7 +287,7 @@ function createEnv() {
         const out = ctx.doPost({ postData: { contents: JSON.stringify({ action, payload, token, branch_id, req_id }) } });
         return JSON.parse(out.content);
     };
-    return { ctx, ss, call, mails, alerts, cache, triggers, drive, props };
+    return { ctx, ss, call, mails, alerts, cache, cacheTtl, expireCache, triggers, drive, props };
 }
 
 module.exports = { createEnv };
