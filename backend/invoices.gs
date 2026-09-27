@@ -3,7 +3,7 @@
  *   - GST folder = bills printed as TAX INVOICE (GST shown and the shop's GSTIN set); the rest go to Non-GST,
  *     so the accountant can take just the GST folder;
  *   - made here on the server from the saved bill (the phone only asks), so the app stays light;
- *   - every 15 min a timer saves PDFs for new bills and credit notes (checkout is never slowed down);
+ *   - every night at 2 am a timer saves PDFs for the day's bills and credit notes (checkout is never slowed down);
  *   - "Save PDF to Drive" on a bill does it at once; a voided bill's PDF is renamed …-VOID.pdf.
  * Files stay private to the shop account.
  */
@@ -257,7 +257,7 @@ function invoicePdfHtml_(d) {
 
 function creditNoteHtml_(r) {
     const e = escHtml_;
-    const sale = findBy_("Sales", "id", r.sale_id) || {};
+    const sale = findById_("Sales", r.sale_id) || {}; // the bill's own row, not the whole Sales sheet
     const saleItems = indexBy_(windowRows_("Sale_Items", "sale_id", r.sale_id, r.sale_id), "id");
     const items = windowRows_("Return_Items", "return_id", r.id, r.id);
     const rows2 = items
@@ -293,9 +293,10 @@ function creditNoteHtml_(r) {
 /* ---------- saving ---------- */
 
 // builds the PDF outside the lock (it takes a couple of seconds), then records it under a short lock
-function savePdfForSale_(s) {
+// `pre`: the bill's lines, payments and returns when the caller already has them (the night run)
+function savePdfForSale_(s, pre) {
     const voided = s.status === "voided";
-    const url = makePdf_(invoicePdfHtml_(saleDetail_(s, null)), pdfName_(s.invoice_no, voided), invoiceFolder_(s.date, isTaxInvoice_(s)));
+    const url = makePdf_(invoicePdfHtml_(saleDetail_(s, null, pre)), pdfName_(s.invoice_no, voided), invoiceFolder_(s.date, isTaxInvoice_(s)));
     const stored = url + (voided ? PDF_VOID_MARK_ : "");
     return withLock_(() => {
         // every checkout waits on this lock: look at the bill's own row, not the whole sheet
@@ -335,7 +336,73 @@ function apiSaveInvoicePdf_(p, ctx) {
     return { message: r.already ? "PDF already saved in Drive" : "PDF saved to Drive", data: r };
 }
 
-/** Timer (every 15 min): PDFs for new bills and credit notes, and -VOID names for voided bills. */
+const PDF_RESUME_FN_ = "resumeInvoicePdfs";
+const PDF_HOUR_ = 2; // the night run, while the shop is closed
+const PDF_TAIL_ = 3000; // recent rows of Sale_Items / Payments read once per run — a day's bills sit well inside
+const PDF_SCHEDULE_ = "nightly-2"; // which timer is installed; an older sheet still on the 15-minute one switches itself
+
+/**
+ * A bill's lines, payments and returns for its PDF — or null while the bill isn't fully written yet
+ * (checkout writes the bill row first, then its lines and payments): it is then left for the next run
+ * instead of becoming a PDF with lines missing.
+ *
+ * Lines and payments come from the recent rows read once per run. Both tables are written in bill
+ * order, so a recent bill's rows are all there; a bill at the very start of that block or older, or one
+ * whose lines don't add up to its item count, is read the old way (the whole column), as before.
+ */
+function pdfBillParts_(s, recent) {
+    const from = (rows) => (rows.length && rows[0].sale_id < s.id ? rows.filter((r) => r.sale_id === s.id) : null);
+    const count = (list) => r3_(list.reduce((a, l) => a + (l.unit === "pcs" ? num_(l.qty) : 1), 0));
+    let items = from(recent.items);
+    if (!items || !items.length || count(items) !== r3_(num_(s.items))) items = windowRows_("Sale_Items", "sale_id", s.id, s.id);
+    // what was paid (cash net of change, plus any exchange credit) is the bill total — the rows the PDF
+    // prints; a void's refund rows are negative and a return's carry its id
+    const paid = (list) => r2_(list.filter((p) => num_(p.amount) > 0 && !p.return_id).reduce((a, p) => a + num_(p.amount), 0));
+    let pays = from(recent.payments);
+    if (!pays || paid(pays) !== r2_(num_(s.grand_total))) pays = windowRows_("Payments", "sale_id", s.id, s.id);
+    // every bill has a line; a bill with something to pay has a payment
+    if (!items.length || (num_(s.grand_total) > 0 && !(paid(pays) > 0))) return null;
+    // credit notes: those tables are small and a return can come any time after the bill, so the run
+    // holds them whole; the same rows saleDetail_ would pick (its lines by return id range)
+    const rets = recent.returns ? recent.returns.filter((r) => r.sale_id === s.id) : windowRows_("Returns", "sale_id", s.id, s.id);
+    const retItems = !rets.length ? []
+        : recent.retItems ? recent.retItems.filter((ri) => ri.return_id >= rets[0].id && ri.return_id <= rets[rets.length - 1].id)
+        : windowRows_("Return_Items", "return_id", rets[0].id, rets[rets.length - 1].id);
+    return { items: items, payments: pays, returns: rets, retItems: retItems };
+}
+
+/** One-off follow-up when a night's PDFs don't fit in one run (Apps Script stops a run at 6 minutes). */
+function resumeInvoicePdfs() {
+    clearPdfResume_();
+    savePendingInvoicePdfs();
+}
+
+function schedulePdfResume_() {
+    try {
+        clearPdfResume_();
+        ScriptApp.newTrigger(PDF_RESUME_FN_).timeBased().after(60 * 1000).create();
+    } catch (e) {
+        console.error("schedulePdfResume_", e);
+    }
+}
+
+function clearPdfResume_() {
+    try {
+        ScriptApp.getProjectTriggers()
+            .filter((t) => t.getHandlerFunction() === PDF_RESUME_FN_)
+            .forEach((t) => ScriptApp.deleteTrigger(t));
+    } catch (e) {
+        console.error("clearPdfResume_", e);
+    }
+}
+
+/**
+ * Night timer (2 am, then follow-ups until done): PDFs for the bills and credit notes that have none,
+ * and -VOID names for voided bills. Checkout never waits for this.
+ *
+ * It finds that work from three columns (id, pdf_url, status) instead of reading every bill, and reads
+ * each pending bill's own row — the cost stays small however many bills the shop has.
+ */
 function savePendingInvoicePdfs() {
     resetReqCache_();
     PDF_DIRS_ = {}; // look the folders up again: someone may have moved or renamed them since
@@ -351,21 +418,49 @@ function savePendingInvoicePdfs() {
         console.error("ensureMaintenanceTrigger_", e);
     }
     if (setting_("invoice_pdfs") === "no") return;
+    // a sheet set up before the night run still has the 15-minute timer: swap it once
+    const props = PropertiesService.getScriptProperties();
+    if (props.getProperty("pdf_schedule") !== PDF_SCHEDULE_) {
+        try {
+            syncPdfTrigger_();
+        } catch (e) {
+            console.error("syncPdfTrigger_", e);
+        }
+    }
     const started = Date.now();
-    const inTime = () => Date.now() - started < 4 * 60 * 1000; // Apps Script stops at 6 min; the next run continues
+    const inTime = () => Date.now() - started < 4 * 60 * 1000; // Apps Script stops at 6 min; a follow-up run continues
     let done = 0;
+    let unfinished = false;
     try {
         done += migratePdfFolders_(inTime); // one-time move from the old yyyy-MM folders
     } catch (e) {
         console.error("migratePdfFolders_: " + e);
     }
-    const sales = rows_("Sales").slice().sort((a, b) => a.id - b.id);
-    const returns = rows_("Returns").slice().sort((a, b) => a.id - b.id);
-    for (let i = 0; i < sales.length && inTime(); i++) {
-        const s = sales[i];
+    const sales = pendingPdfRows_("Sales", true);
+    const returns = pendingPdfRows_("Returns", false);
+    // a bill's lines and payments: the recent rows, read once for the whole run
+    const recent = sales.some((p) => !p.url)
+        ? {
+            items: tailRows_("Sale_Items", PDF_TAIL_), payments: tailRows_("Payments", PDF_TAIL_),
+            returns: rows_("Returns").slice(), retItems: rows_("Return_Items").slice(),
+        }
+        : { items: [], payments: [] };
+    for (let i = 0; i < sales.length; i++) {
+        if (!inTime()) {
+            unfinished = true;
+            break;
+        }
+        let s = null;
         try {
+            s = rowIfId_("Sales", sales[i].r, sales[i].id) || findById_("Sales", sales[i].id);
+            if (!s) continue;
             if (!s.pdf_url) {
-                savePdfForSale_(s);
+                const parts = pdfBillParts_(s, recent);
+                if (!parts) {
+                    console.warn("PDF for " + s.invoice_no + ": bill not fully saved yet — next run");
+                    continue;
+                }
+                savePdfForSale_(s, parts);
                 done++;
             } else if (s.status === "voided" && s.pdf_url.slice(-PDF_VOID_MARK_.length) !== PDF_VOID_MARK_) {
                 DriveApp.getFileById(pdfFileId_(s.pdf_url)).setName(pdfName_(s.invoice_no, true));
@@ -379,26 +474,64 @@ function savePendingInvoicePdfs() {
                 done++;
             }
         } catch (e) {
-            console.error("PDF for " + s.invoice_no + ": " + e); // retried on the next run
+            console.error("PDF for " + (s ? s.invoice_no : "bill " + sales[i].id) + ": " + e); // retried on the next run
         }
     }
-    for (let i = 0; i < returns.length && inTime(); i++) {
-        if (returns[i].pdf_url) continue;
+    for (let i = 0; i < returns.length; i++) {
+        if (!inTime()) {
+            unfinished = true;
+            break;
+        }
+        let r = null;
         try {
-            savePdfForReturn_(returns[i]);
+            r = rowIfId_("Returns", returns[i].r, returns[i].id) || findById_("Returns", returns[i].id);
+            if (!r || r.pdf_url) continue;
+            // the credit note's lines are written after its row: not there yet → next run
+            if (!windowRows_("Return_Items", "return_id", r.id, r.id).length) {
+                console.warn("PDF for " + r.credit_note_no + ": credit note not fully saved yet — next run");
+                continue;
+            }
+            savePdfForReturn_(r);
             done++;
         } catch (e) {
-            console.error("PDF for " + returns[i].credit_note_no + ": " + e);
+            console.error("PDF for " + (r ? r.credit_note_no : "credit note " + returns[i].id) + ": " + e);
         }
     }
+    if (unfinished) schedulePdfResume_(); // more than one run's worth tonight: carry on in a minute
     return done;
+}
+
+/**
+ * Which rows need PDF work, from the id / pdf_url (/ status) columns only: {id, r (sheet row), url},
+ * oldest first. Sales: no PDF yet, or voided with the PDF not yet renamed. Returns: no PDF yet.
+ */
+function pendingPdfRows_(name, withVoids) {
+    const ids = columnValues_(name, "id");
+    const urls = columnValues_(name, "pdf_url");
+    const status = withVoids ? columnValues_(name, "status") : [];
+    const n = Math.min(ids.length, urls.length, withVoids ? status.length : urls.length); // a row added between reads waits for the next run
+    const out = [];
+    for (let i = 0; i < n; i++) {
+        const id = num_(ids[i]);
+        if (!id) continue; // an emptied row
+        const url = str_(urls[i]);
+        const renameVoid = withVoids && url && status[i] === "voided" && url.slice(-PDF_VOID_MARK_.length) !== PDF_VOID_MARK_;
+        if (!url || renameVoid) out.push({ id: id, r: i + 2, url: url });
+    }
+    return out.sort((a, b) => a.id - b.id);
 }
 
 function syncPdfTrigger_() {
     ScriptApp.getProjectTriggers()
         .filter((t) => t.getHandlerFunction() === PDF_FN_)
         .forEach((t) => ScriptApp.deleteTrigger(t));
-    if (setting_("invoice_pdfs") === "no") return false;
-    ScriptApp.newTrigger(PDF_FN_).timeBased().everyMinutes(15).create();
+    const props = PropertiesService.getScriptProperties();
+    if (setting_("invoice_pdfs") === "no") {
+        clearPdfResume_();
+        props.deleteProperty("pdf_schedule");
+        return false;
+    }
+    ScriptApp.newTrigger(PDF_FN_).timeBased().everyDays(1).atHour(PDF_HOUR_).inTimezone(APP.TZ).create();
+    props.setProperty("pdf_schedule", PDF_SCHEDULE_);
     return true;
 }

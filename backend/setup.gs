@@ -550,10 +550,10 @@ function seedDemo() {
     alert_("Demo data loaded: 2 branches (Kondhwa, Kalyani Nagar), " + demo.length + " products, " + n + " bills, 3 staff users (password demo1234).");
 }
 
-// (re)installs the 15-minute invoice-PDF timer; Setup is the place where Google asks for permission
+// (re)installs the nightly invoice-PDF timer; Setup is the place where Google asks for permission
 function pdfTimerMsg_() {
     try {
-        return syncPdfTrigger_() ? "\nInvoice PDFs: saved to Drive every 15 minutes." : "";
+        return syncPdfTrigger_() ? "\nInvoice PDFs: saved to Drive every night at 2 am." : "";
     } catch (e) {
         console.error("syncPdfTrigger_", e);
         return "\nInvoice PDF timer could not be set up: " + e;

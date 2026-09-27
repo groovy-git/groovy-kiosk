@@ -92,7 +92,7 @@ export default function SettingsPage() {
             <div className="field">
               <label>Save invoice PDFs to Google Drive automatically</label>
               <Seg value={f.invoice_pdfs || "yes"} onChange={set("invoice_pdfs")} options={[{ value: "yes", label: "On" }, { value: "no", label: "Off" }]} />
-              <div className="hint">Every 15 minutes, new bills and credit notes are saved as PDFs in the “Sales_Invoices” folder next to the Sheet. Checkout is not slowed down. Any bill can also be saved by hand from Sales → bill.</div>
+              <div className="hint">Every night at 2 am, the day’s bills and credit notes are saved as PDFs in the “Sales_Invoices” folder next to the Sheet. Checkout is not slowed down. Any bill can also be saved by hand from Sales → bill.</div>
             </div>
             <Field label="Expense categories" hint="Comma separated"><textarea className="input" value={f.expense_categories || ""} onChange={set("expense_categories")} /></Field>
           </div>

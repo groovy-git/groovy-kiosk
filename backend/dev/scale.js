@@ -118,15 +118,16 @@ run(`(function(N){
     const branch = rnd() < 0.5 ? 1 : 2;
     const c = rnd() < 0.6 ? pick(custs) : null;
     const nLines = 1 + Math.floor(rnd() * 3);
-    let total = 0;
+    let total = 0, pcs = 0; // a bill's item count is its pieces, as checkout stores it
     for (let k = 0; k < nLines; k++) {
       const v = pick(allVars), qty = 1 + Math.floor(rnd() * 2), line = v.sell_price * qty;
       total += line;
+      pcs += qty;
       items.push({ id: iid++, sale_id: sid, variant_id: v.id, product_name: "Scale", brand: "", size: v.size_label, barcode: v.barcode, hsn: "3303", qty, unit: "pcs", mrp: v.mrp, price: v.sell_price, discount: 0, bill_disc_share: 0, line_total: line, gst_rate: 18, taxable: r2_(line / 1.18), tax: r2_(line - line / 1.18), unit_cost: 400, returned_qty: 0 });
       moves.push({ id: mid++, variant_id: v.id, type: "sale", qty: -qty, unit_cost: 400, balance: 40, ref_type: "sale", ref_id: String(sid), note: "", user_id: 1, at, branch_id: branch });
     }
     const voided = rnd() < 0.02;
-    sales.push({ id: sid, client_ref: "scale-" + sid, invoice_no: "SC/25-26/" + pad_(sid, 6), fy: "25-26", date: at, customer_id: c ? c.id : 0, customer_name: c ? c.name : "", customer_phone: c ? c.phone : "", customer_gstin: "", salesman_id: 1, salesman_name: "Owner", created_by: 1, items: nLines, gross: total, item_disc: 0, bill_disc: 0, taxable: r2_(total / 1.18), cgst: r2_((total - total / 1.18) / 2), sgst: r2_((total - total / 1.18) / 2), round_off: 0, grand_total: total, tendered: total, change: 0, refunded: voided ? total : 0, status: voided ? "voided" : "completed", notes: "", updated_at: at, gst_hidden: 0, branch_id: branch, pdf_url: i < N - 20 ? "https://drive.google.com/file/d/SCALE" + sid + "/view" + (voided ? "#void" : "") : "" });
+    sales.push({ id: sid, client_ref: "scale-" + sid, invoice_no: "SC/25-26/" + pad_(sid, 6), fy: "25-26", date: at, customer_id: c ? c.id : 0, customer_name: c ? c.name : "", customer_phone: c ? c.phone : "", customer_gstin: "", salesman_id: 1, salesman_name: "Owner", created_by: 1, items: pcs, gross: total, item_disc: 0, bill_disc: 0, taxable: r2_(total / 1.18), cgst: r2_((total - total / 1.18) / 2), sgst: r2_((total - total / 1.18) / 2), round_off: 0, grand_total: total, tendered: total, change: 0, refunded: voided ? total : 0, status: voided ? "voided" : "completed", notes: "", updated_at: at, gst_hidden: 0, branch_id: branch, pdf_url: i < N - 20 ? "https://drive.google.com/file/d/SCALE" + sid + "/view" + (voided ? "#void" : "") : "" });
     pays.push({ id: payid++, sale_id: sid, return_id: 0, method: rnd() < 0.5 ? "cash" : "upi", amount: total, reference: "", user_id: 1, at });
     sid++;
   }

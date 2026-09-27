@@ -752,7 +752,8 @@ const gpFolder = env.drive.root.createFolder("Groovy POS");
 env.drive.sheetFile.parent = gpFolder; // the owner moved the Sheet into "Groovy POS"
 const pdfFiles = () => env.drive.files().filter((f) => !f.trashed && /\.pdf$/.test(f.name));
 const pathOf = (f) => { const p = []; let x = f.parent; while (x) { p.unshift(x.name); x = x.parent; } return p.join("/"); };
-check("PDF timer installed every 15 min", env.triggers.some((x) => x.fn === "savePendingInvoicePdfs" && x.minutes === 15), env.triggers);
+check("PDF timer installed every night at 2 am (India time)", env.triggers.filter((x) => x.fn === "savePendingInvoicePdfs").length === 1 &&
+    env.triggers.some((x) => x.fn === "savePendingInvoicePdfs" && x.days === 1 && x.hour === 2 && x.tz === "Asia/Kolkata" && !x.minutes), env.triggers);
 const pdfSaleReq = { client_ref: "pdf-1", lines: [{ variant_id: vBottle.id, qty: 1 }], customer: { phone: "9876500001", name: "<b>Evil</b> & Co" }, payments: [{ method: "cash", amount: 50 }] };
 const pdfSale = ok(call("completeSale", pdfSaleReq, T, 1), "sale for PDF").sale;
 const pdf1 = ok(call("saveInvoicePdf", { id: pdfSale.id }, T, 1), "save PDF manually");
@@ -909,6 +910,93 @@ ok(call("completeSale", Object.assign({}, pdfSaleReq, { client_ref: "pdf-3", cus
 check("PDFs off: job does nothing", ctx.savePendingInvoicePdfs() === undefined && pdfFiles().length === pdfTotal);
 ok(call("saveSettings", { settings: { invoice_pdfs: "yes" } }, T), "PDFs on");
 check("PDFs on: timer back", env.triggers.filter((x) => x.fn === "savePendingInvoicePdfs").length === 1);
+
+// ---- the night run reads less: same work found, same PDFs, never from a half-saved bill ----
+ok(call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 60, unit_cost: 40 }] }, T, 1), "stock for the night-run tests");
+// what needs doing: found from three columns, the same bills the old whole-sheet read found
+const voidLater = ok(call("completeSale", Object.assign({}, pdfSaleReq, { client_ref: "pdf-void-later", customer: {} }), T, 1), "bill voided after its PDF").sale;
+ok(call("saveInvoicePdf", { id: voidLater.id }, T, 1), "its PDF");
+ok(call("voidSale", { id: voidLater.id, reason: "t" }, T, 1), "void it");
+const oldPending = vmRun(`resetReqCache_(); JSON.stringify([rows_("Sales").filter((s) => !s.pdf_url || (s.status === "voided" && s.pdf_url.slice(-5) !== "#void")).map((s) => s.id).sort((a, b) => a - b), rows_("Returns").filter((r) => !r.pdf_url).map((r) => r.id).sort((a, b) => a - b)])`);
+const newPending = vmRun(`resetReqCache_(); JSON.stringify([pendingPdfRows_("Sales", true).map((p) => p.id), pendingPdfRows_("Returns", false).map((p) => p.id)])`);
+check("night run finds the same bills to do as the old full read", oldPending === newPending && JSON.parse(newPending)[0].length >= 2, { oldPending, newPending });
+check("night run: each pending row number points at its bill", vmRun(`resetReqCache_(); pendingPdfRows_("Sales", true).every((p) => { const r = rowIfId_("Sales", p.r, p.id); return r && r.id === p.id; })`));
+// the PDF made from the recent rows is the same, character for character, as the one made the old way
+const htmlSame = (tailN) => vmRun(`resetReqCache_(); (() => {
+    const recent = { items: tailRows_("Sale_Items", ${tailN}), payments: tailRows_("Payments", ${tailN}) };
+    const bad = [];
+    rows_("Sales").forEach((s) => {
+        const parts = pdfBillParts_(s, recent);
+        const a = invoicePdfHtml_(saleDetail_(s, null));
+        const b = parts ? invoicePdfHtml_(saleDetail_(s, null, parts)) : "(skipped)";
+        if (a !== b) bad.push(s.invoice_no);
+    });
+    return JSON.stringify({ n: rows_("Sales").length, bad });
+})()`);
+const hs1 = JSON.parse(htmlSame(3000));
+check("night run: every bill's PDF identical to the old way (" + hs1.n + " bills)", hs1.n > 20 && hs1.bad.length === 0, hs1);
+const hs2 = JSON.parse(htmlSame(7));
+check("night run: bills older than the recent rows are read the old way, PDF identical", hs2.bad.length === 0, hs2);
+check("night run: a partial block of lines is never used", vmRun(`resetReqCache_(); (() => {
+    const s = rows_("Sales").filter((x) => windowRows_("Sale_Items", "sale_id", x.id, x.id).length > 1).pop();
+    const lines = windowRows_("Sale_Items", "sale_id", s.id, s.id);
+    const recent = { items: [{ sale_id: 0 }].concat(lines.slice(1)), payments: [] }; // one line cut off
+    return invoicePdfHtml_(saleDetail_(s, null, pdfBillParts_(s, recent))) === invoicePdfHtml_(saleDetail_(s, null));
+})()`));
+// a bill whose lines / payments aren't written yet waits for the next run instead of becoming a wrong PDF
+const halfSale = ok(call("completeSale", { client_ref: "pdf-half", lines: [{ variant_id: vBottle.id, qty: 2 }], payments: [{ method: "cash", amount: 100 }] }, T, 1), "bill for the half-saved test").sale;
+const halfName = halfSale.invoice_no.replace(/\//g, "-") + ".pdf";
+const hideRows = (table) => vmRun(`resetReqCache_(); (() => {
+    const sh = sheet_("${table}"); const w = cols_("${table}").length;
+    const rows = windowRows_("${table}", "sale_id", ${halfSale.id}, ${halfSale.id});
+    const saved = rows.map((r) => ({ r: r._r, v: sh.getRange(r._r, 1, 1, w).getValues() }));
+    emptyRows_("${table}", rows.map((r) => r._r));
+    return JSON.stringify(saved);
+})()`);
+const putBack = (table, saved) => vmRun(`resetReqCache_(); (() => { const sh = sheet_("${table}"); const w = cols_("${table}").length;
+    ${saved}.forEach((x) => sh.getRange(x.r, 1, 1, w).setValues(x.v)); resetReqCache_(); })()`);
+const savedItems = hideRows("Sale_Items");
+ctx.savePendingInvoicePdfs();
+check("bill without its lines yet: no PDF made", !pdfFiles().some((f) => f.name === halfName) && !ok(call("getSale", { id: halfSale.id }, T, 1), "half bill").sale.pdf_url);
+putBack("Sale_Items", savedItems);
+const savedPays = hideRows("Payments");
+ctx.savePendingInvoicePdfs();
+check("bill without its payment yet: no PDF made", !pdfFiles().some((f) => f.name === halfName));
+putBack("Payments", savedPays);
+ctx.savePendingInvoicePdfs();
+const halfPdf = pdfFiles().find((f) => f.name === halfName);
+check("once fully saved, the next run makes its PDF with its lines", !!halfPdf && halfPdf.html.includes(vBottle.product_name || "Bottle") &&
+    !!ok(call("getSale", { id: halfSale.id }, T, 1), "half bill").sale.pdf_url, halfPdf && halfPdf.name);
+check("the voided bill's PDF is renamed by the night run", vmRun(`resetReqCache_(); rows_("Sales").find((x) => x.client_ref === "pdf-void-later").pdf_url.slice(-5) === "#void"`));
+// a zero-total bill has no payment rows and still gets its PDF
+check("night run: nothing left to do", vmRun(`resetReqCache_(); pendingPdfRows_("Sales", true).length + pendingPdfRows_("Returns", false).length`) === 0);
+// a night with more than one run's worth: it stops at the time budget and carries on a minute later
+for (let i = 0; i < 6; i++) ok(call("completeSale", { client_ref: "pdf-many-" + i, lines: [{ variant_id: vBottle.id, qty: 1 }], payments: [{ method: "cash", amount: 50 }] }, T, 1), "bill " + i);
+const realNow = Date.now;
+let ticks = 0;
+Date.now = () => realNow() + ticks++ * 50 * 1000; // every look at the clock: 50 s later
+let firstPart;
+try {
+    firstPart = ctx.savePendingInvoicePdfs();
+} finally {
+    Date.now = realNow;
+}
+const leftAfterFirst = vmRun(`resetReqCache_(); pendingPdfRows_("Sales", true).length`);
+check("long night: first run stops at its time budget", firstPart >= 0 && leftAfterFirst > 0, { firstPart, leftAfterFirst });
+check("long night: a follow-up run is booked a minute later", env.triggers.filter((x) => x.fn === "resumeInvoicePdfs" && x.afterMs === 60000).length === 1, env.triggers);
+ctx.resumeInvoicePdfs();
+check("long night: the follow-up finishes and clears itself",
+    vmRun(`resetReqCache_(); pendingPdfRows_("Sales", true).length`) === 0 && !env.triggers.some((x) => x.fn === "resumeInvoicePdfs"));
+// a sheet still on the old 15-minute timer switches itself to the night run the first time it runs
+env.props.delete("pdf_schedule");
+env.triggers.splice(env.triggers.findIndex((x) => x.fn === "savePendingInvoicePdfs"), 1);
+ctx.ScriptApp.newTrigger("savePendingInvoicePdfs").timeBased().everyMinutes(15).create();
+ctx.savePendingInvoicePdfs();
+check("old 15-minute timer replaced by the 2 am one", env.triggers.filter((x) => x.fn === "savePendingInvoicePdfs").length === 1 &&
+    env.triggers.some((x) => x.fn === "savePendingInvoicePdfs" && x.hour === 2 && !x.minutes), env.triggers.filter((x) => /Pdf|pdf/.test(x.fn)));
+ok(call("saveSettings", { settings: { invoice_pdfs: "no" } }, T), "PDFs off again");
+check("PDFs off: follow-up and night timers gone", !env.triggers.some((x) => /savePendingInvoicePdfs|resumeInvoicePdfs/.test(x.fn)));
+ok(call("saveSettings", { settings: { invoice_pdfs: "yes" } }, T), "PDFs on again");
 
 // Generate SKU continues the website series (SKU-0001 …); numbers are never handed out twice
 const genSku = () => call("generateSku", {}, T, 1);
