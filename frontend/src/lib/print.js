@@ -37,10 +37,13 @@ function shopFor(d, s) {
 const itemName = (i) => `${i.product_name}${i.size && i.unit !== "ml" ? " " + i.size : ""}`;
 
 /* ---------- 80mm thermal receipt ---------- */
+// a bill printed without GST names no GSTIN either — not the shop's (nor its State), not the customer's
+const shopForBill = (s, showGst) => (showGst ? s : { ...s, gstin: "" });
+
 export function receiptHtml(d, s) {
-  s = shopFor(d, s);
   const sale = d.sale;
   const showGst = !sale.gst_hidden; // GST breakup can be left off the customer's bill
+  s = shopForBill(shopFor(d, s), showGst);
   const rates = gstByRate(d.items);
   const saved = savings(d);
   const rows = d.items
@@ -84,7 +87,7 @@ export function receiptHtml(d, s) {
     <div class="kv"><span>No: ${esc(sale.invoice_no)}</span></div>
     <div class="kv"><span>${esc(fmtDateTime(sale.date))}</span><span>Served by: ${esc(sale.salesman_name)}</span></div>
     ${sale.customer_name || sale.customer_phone ? `<div>Customer: ${esc(sale.customer_name || "")} ${esc(sale.customer_phone || "")}</div>` : ""}
-    ${sale.customer_gstin ? `<div>Cust GSTIN: ${esc(sale.customer_gstin)}</div>` : ""}
+    ${showGst && sale.customer_gstin ? `<div>Cust GSTIN: ${esc(sale.customer_gstin)}</div>` : ""}
     ${sale.status === "voided" ? `<div class="c b">*** VOIDED ***</div>` : ""}
     <hr>${rows}<hr>
     <div class="kv"><span>Items total</span><span>${inr(sale.gross)}</span></div>
@@ -176,9 +179,9 @@ const a4Meta = (cells) =>
     .join("")}</tr></table>`;
 
 export function a4InvoiceHtml(d, s) {
-  s = shopFor(d, s);
   const sale = d.sale;
   const showGst = !sale.gst_hidden; // GST breakup can be left off the customer's bill
+  s = shopForBill(shopFor(d, s), showGst);
   const rates = gstByRate(d.items);
   const money = (v, i) => inr(v, { paise: i && i.unit === "ml" });
   const rows = d.items
@@ -223,7 +226,7 @@ export function a4InvoiceHtml(d, s) {
   const body = `${a4Meta([
     ["Invoice No", `<b>${esc(sale.invoice_no)}</b>`],
     ["Date", `<span style="white-space:nowrap">${esc(fmtDateTimeFull(sale.date))}</span>`],
-    ["Bill To", esc(sale.customer_name || "Walk-in customer") + (sale.customer_phone ? "<br>" + esc(sale.customer_phone) : "") + (sale.customer_gstin ? "<br>GSTIN: " + esc(sale.customer_gstin) : "")],
+    ["Bill To", esc(sale.customer_name || "Walk-in customer") + (sale.customer_phone ? "<br>" + esc(sale.customer_phone) : "") + (showGst && sale.customer_gstin ? "<br>GSTIN: " + esc(sale.customer_gstin) : "")],
     ["Served By", esc(sale.salesman_name)],
   ])}
     <table class="items" style="margin-top:12px"><thead>${head}</thead><tbody>${rows}</tbody></table>

@@ -188,6 +188,7 @@ function invoicePdfHtml_(d) {
     const sale = d.sale;
     const shop = pdfShop_(sale.branch_id);
     const showGst = !sale.gst_hidden;
+    if (!showGst) shop.gstin = ""; // a bill without GST names no GSTIN (nor State) — nor the customer's, below
     const name = (i) => i.product_name + (i.size && i.unit !== "ml" ? " " + i.size : "");
     const qty = (i) => (i.unit === "ml" ? r3_(i.qty) + " ml" : String(i.qty));
     const rates = {};
@@ -247,7 +248,7 @@ function invoicePdfHtml_(d) {
         pdfMeta_([
             ["Invoice No", "<b>" + e(sale.invoice_no) + "</b>"],
             ["Date", '<span style="white-space:nowrap">' + pdfDate_(sale.date) + "</span>"],
-            ["Bill To", e(sale.customer_name || "Walk-in customer") + (sale.customer_phone ? "<br>" + e(sale.customer_phone) : "") + (sale.customer_gstin ? "<br>GSTIN: " + e(sale.customer_gstin) : "")],
+            ["Bill To", e(sale.customer_name || "Walk-in customer") + (sale.customer_phone ? "<br>" + e(sale.customer_phone) : "") + (showGst && sale.customer_gstin ? "<br>GSTIN: " + e(sale.customer_gstin) : "")],
             ["Served By", e(sale.salesman_name)],
         ]) +
         '<table class="items" style="margin-top:12px"><thead>' + head + "</thead><tbody>" + rows + "</tbody></table>" +
@@ -258,6 +259,10 @@ function invoicePdfHtml_(d) {
 function creditNoteHtml_(r) {
     const e = escHtml_;
     const sale = findById_("Sales", r.sale_id) || {}; // the bill's own row, not the whole Sales sheet
+    // a credit note follows its bill: a bill printed without GST gets one without GST too
+    const showGst = !sale.gst_hidden;
+    const shop = pdfShop_(r.branch_id);
+    if (!showGst) shop.gstin = "";
     const saleItems = indexBy_(windowRows_("Sale_Items", "sale_id", r.sale_id, r.sale_id), "id");
     const items = windowRows_("Return_Items", "return_id", r.id, r.id);
     const rows2 = items
@@ -266,12 +271,13 @@ function creditNoteHtml_(r) {
             const nm = (si.product_name || "Item") + (si.size && si.unit !== "ml" ? " " + si.size : "");
             const bg = n % 2 ? ' style="background:#faf7f2"' : "";
             return "<tr" + bg + '><td class="muted">' + (n + 1) + "</td><td><b>" + e(nm) + '</b></td><td class="n">' + (si.unit === "ml" ? r3_(x.qty) + " ml" : x.qty) +
-                '</td><td class="n">' + Number(x.taxable).toFixed(2) + '</td><td class="n">' + Number(x.tax).toFixed(2) + '</td><td class="n b">' + inrText_(x.amount) + "</td></tr>";
+                (showGst ? '</td><td class="n">' + Number(x.taxable).toFixed(2) + '</td><td class="n">' + Number(x.tax).toFixed(2) : "") +
+                '</td><td class="n b">' + inrText_(x.amount) + "</td></tr>";
         })
         .join("");
     const line = (l, v, cls) => '<tr class="' + (cls || "") + '"><td>' + l + '</td><td class="v">' + v + "</td></tr>";
     const totals =
-        '<table class="tot">' + line("Taxable value", inrText_(r.taxable)) + line("GST", inrText_(r.tax)) +
+        '<table class="tot">' + (showGst ? line("Taxable value", inrText_(r.taxable)) + line("GST", inrText_(r.tax)) : "") +
         line("Refund", inrText_(r.total), "grand") +
         line("Refunded by", e(METHOD_NAME_[r.refund_method] || r.refund_method || "")) + "</table>";
     const body =
@@ -282,12 +288,13 @@ function creditNoteHtml_(r) {
             ["Customer", e(sale.customer_name || "Walk-in customer") + (sale.customer_phone ? "<br>" + e(sale.customer_phone) : "")],
         ]) +
         '<table class="items" style="margin-top:12px"><thead><tr><th style="width:22px">#</th><th>Item returned</th>' +
-        '<th class="n" style="width:46px">Qty</th><th class="n" style="width:66px">Taxable</th>' +
-        '<th class="n" style="width:58px">GST</th><th class="n" style="width:74px">Amount</th>' +
+        '<th class="n" style="width:46px">Qty</th>' +
+        (showGst ? '<th class="n" style="width:66px">Taxable</th><th class="n" style="width:58px">GST</th>' : "") +
+        '<th class="n" style="width:74px">Amount</th>' +
         "</tr></thead><tbody>" + rows2 + "</tbody></table>" +
         '<table style="margin-top:14px"><tr><td style="padding-right:16px">' + (r.reason ? '<div class="lbl">Reason</div><div class="small">' + e(r.reason) + "</div>" : "") +
         '</td><td style="width:265px">' + totals + "</td></tr></table>";
-    return pdfPage_(pdfShop_(r.branch_id), "CREDIT NOTE", "", body, "");
+    return pdfPage_(shop, "CREDIT NOTE", "", body, "");
 }
 
 /* ---------- saving ---------- */

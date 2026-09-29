@@ -792,6 +792,22 @@ ok(call("returnItems", { sale_id: gstSale.id, items: [{ sale_item_id: gstDetail.
 ctx.savePendingInvoicePdfs();
 const cnFile = pdfFiles().filter((f) => /C-|CN-/.test(f.name)).pop();
 check("credit note filed with its bill", cnFile && pathOf(cnFile).endsWith("/GST"), cnFile && pathOf(cnFile));
+// "Show GST on bill" off: no GSTIN anywhere on the bill — not the shop's (nor its State), not the customer's —
+// and its credit note follows it; a bill with GST shown keeps all of it
+check("GST bill PDF shows the shop GSTIN and State", /GSTIN: 27ABCDE1234F1Z5 · State:/.test(gstFile.html) && /TAX INVOICE/.test(gstFile.html));
+check("GST bill's credit note shows GST", /GSTIN: 27ABCDE1234F1Z5/.test(cnFile.html) && /Taxable/.test(cnFile.html) && /<td>GST<\/td>/.test(cnFile.html));
+ok(call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 1, unit_cost: 40 }] }, T, 1), "stock for it (2 sold, 1 back: stock ends as before)");
+const bizHidden = ok(call("completeSale", { client_ref: "pdf-nogst-biz", gst_hidden: true, lines: [{ variant_id: vBottle.id, qty: 2 }], customer: { name: "Biz Buyer", gstin: "27BBBBB2222B1Z2" }, payments: [{ method: "cash", amount: 100 }] }, T, 1), "GST-hidden bill for a business customer").sale;
+ok(call("saveInvoicePdf", { id: bizHidden.id }, T, 1), "its PDF");
+const bizFile = pdfFiles().find((f) => f.name === bizHidden.invoice_no.replace(/[/]/g, "-") + ".pdf");
+check("GST hidden: PDF names no GSTIN (shop or customer) and no State", !!bizFile && !/GSTIN|27ABCDE1234F1Z5|27BBBBB2222B1Z2|State:/.test(bizFile.html), bizFile && bizFile.html.match(/GSTIN[^<]*|State:[^<]*/g));
+check("GST hidden: PDF is a plain INVOICE with its items and total", !!bizFile && />INVOICE</.test(bizFile.html) && !/TAX INVOICE|CGST|HSN/.test(bizFile.html) && /Biz Buyer/.test(bizFile.html) && /Grand Total/.test(bizFile.html));
+const bizDetail = ok(call("getSale", { id: bizHidden.id }, T, 1), "its detail");
+ok(call("returnItems", { sale_id: bizHidden.id, items: [{ sale_item_id: bizDetail.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "test" }, T, 1), "return on it");
+ctx.savePendingInvoicePdfs();
+const bizCn = pdfFiles().filter((f) => /C-|CN-/.test(f.name)).pop();
+check("GST hidden: its credit note has no GSTIN, State, Taxable or GST", !!bizCn && bizCn !== cnFile && !/GSTIN|State:|Taxable|<td>GST<\/td>|>GST</.test(bizCn.html), bizCn && bizCn.html.match(/GSTIN|State:|Taxable|>GST</g));
+check("GST hidden: its credit note still shows the item, amount and refund", !!bizCn && /CREDIT NOTE/.test(bizCn.html) && /Refund/.test(bizCn.html) && /Amount/.test(bizCn.html) && /pdf-nogst-biz|Biz Buyer/.test(bizCn.html));
 ok(call("saveSettings", { settings: { gstin: "" } }, T), "clear GSTIN again");
 check("pdf_url stored on the bill", !!pdf1.pdf_url && ok(call("getSale", { id: pdfSale.id }, T, 1), "bill detail").sale.pdf_url === pdf1.pdf_url);
 check("PDF html escapes customer name", pdfFile && pdfFile.html.includes("&lt;b&gt;Evil&lt;/b&gt; &amp; Co") && !pdfFile.html.includes("<b>Evil"));
