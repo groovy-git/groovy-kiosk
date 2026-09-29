@@ -392,7 +392,8 @@ function reportRegister_(p, ctx) {
 function reportGst_(p, ctx) {
     const { from, to } = rangeOf_(p);
     const { sales, returns } = scope_(ctx, from, to);
-    const rs = sales.filter((s) => inRange_(s.date, from, to));
+    // bills made at a branch without GST aren't GST supplies: left out, and so are their credit notes
+    const rs = sales.filter((s) => inRange_(s.date, from, to) && s.gst_hidden !== GST_OFF_BRANCH_);
     const ids = indexBy_(rs, "id");
     const items = saleItemsFor_(rs.map((s) => s.id)).filter((i) => ids[i.sale_id]);
     const byRate = {};
@@ -410,8 +411,8 @@ function reportGst_(p, ctx) {
         h.tax = r2_(h.tax + i.tax);
         h.total = r2_(h.total + i.line_total);
     });
-    // credit notes (returns) in range by rate
-    const rets = returns.filter((r) => inRange_(r.at, from, to));
+    // credit notes (returns) in range by rate — not those against a no-GST branch bill (marked when made)
+    const rets = returns.filter((r) => inRange_(r.at, from, to) && !r.gst_off);
     const rIds = indexBy_(rets, "id");
     const siMap = indexBy_(saleItemsFor_(rets.map((r) => r.sale_id)), "id");
     const cnByRate = {};

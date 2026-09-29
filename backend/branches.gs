@@ -23,8 +23,17 @@ function branchName_(id) {
 }
 
 function branchOut_(b) {
-    return { id: b.id, name: b.name, code: b.code, address: b.address, phone: b.phone, active: b.active };
+    return { id: b.id, name: b.name, code: b.code, address: b.address, phone: b.phone, active: b.active, gst_off: b.gst_off ? 1 : 0 };
 }
+
+// a branch that isn't GST-registered: its bills are recorded with no GST (and left out of GST reports)
+function branchGstOff_(id) {
+    const b = branchById_(id);
+    return !!(b && b.gst_off);
+}
+
+// sale.gst_hidden: 0 = GST shown, 1 = "Show GST on bill" unticked, 2 = billed at a branch without GST
+const GST_OFF_BRANCH_ = 2;
 
 function parseIdList_(s) {
     return String(s || "")
@@ -204,12 +213,13 @@ function apiSaveBranch_(p, ctx) {
                 fail_("This branch already has bills — its code (bill number series) can't change");
             const active = p.active === undefined ? b.active : p.active ? 1 : 0;
             if (!active && all.filter((x) => x.active && x.id !== b.id).length === 0) fail_("At least one branch must stay active");
-            Object.assign(b, { name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active });
+            const gstOff = p.gst_off === undefined ? (b.gst_off ? 1 : 0) : p.gst_off ? 1 : 0; // an older app doesn't send it: kept
+            Object.assign(b, { name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active, gst_off: gstOff });
             updateRows_("Branches", [b]);
             log_(ctx, "UPDATE", "Branches", b.id, name);
             return { message: "Branch saved", data: branchOut_(b) };
         }
-        const b = { id: nextId_("Branches"), name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active: 1, created_at: now };
+        const b = { id: nextId_("Branches"), name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active: 1, created_at: now, gst_off: p.gst_off ? 1 : 0 };
         appendRows_("Branches", [b]);
         log_(ctx, "CREATE", "Branches", b.id, name + (code ? " (" + code + ")" : ""));
         return { message: "Branch added", data: branchOut_(b) };

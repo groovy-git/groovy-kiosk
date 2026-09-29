@@ -10,7 +10,7 @@ import { Button, Field, MoneyInput, Seg, Sheet, Spinner } from "../../components
 const METHODS = ["upi", "cash", "card"]; // UPI first: most customers pay that way
 
 export default function CheckoutSheet({ open, onClose, preview, onDone }) {
-  const { cart, setCart, clearCart, sellers, user, role, settings, toast, patchStock, catalog, online } = useApp();
+  const { cart, setCart, clearCart, sellers, user, role, settings, toast, patchStock, catalog, online, branch } = useApp();
   // bill discount in % by default (the shop's usual); a discount already on the bill is kept in rupees in the
   // cart, so it reopens in ₹ showing that exact amount — never re-read as a percentage
   const [discMode, setDiscMode] = useState(cart.bill_disc ? "rs" : "pct");
@@ -33,6 +33,8 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   custRef.current = cust;
   const sellerId = cart.salesman_id || user.id;
   const gstOnBill = !cart.gst_hidden;
+  // a branch without GST bills with none — no choice to offer (the server records such bills at 0% GST)
+  const branchNoGst = !!(branch && branch.gst_off);
 
   useEffect(() => {
     if (!open) return;
@@ -135,7 +137,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
         payments: rows.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference })),
         notes: cart.notes || "",
         held_id: cart.held_id || null,
-        gst_hidden: !!cart.gst_hidden,
+        gst_hidden: branchNoGst || !!cart.gst_hidden,
         // the swap: what is coming back, and how any difference goes out
         ...(swap
           ? { sale_id: swap.sale_id, items: swap.items, reason: swap.reason, refund_method: backMethod, override: swap.override || false }
@@ -285,6 +287,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
         {preview.item_disc + preview.bill_disc > 0 && (
           <div className="kv"><span className="k">Discount</span><span className="money ok-text">−{inr(r2(preview.item_disc + preview.bill_disc))}</span></div>
         )}
+        {!branchNoGst && (
         <label className="kv" style={{ alignItems: "center", cursor: "pointer" }}>
           <span className="row gap-s">
             <input
@@ -297,6 +300,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
           </span>
           {gstOnBill ? <span className="money">incl. {inr(preview.tax, { paise: true })}</span> : <span className="small muted">Not printed</span>}
         </label>
+        )}
         {preview.round_off !== 0 && (
           <div className="kv"><span className="k">Round off</span><span className="money">{inr(preview.round_off, { paise: true })}</span></div>
         )}

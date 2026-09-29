@@ -76,7 +76,7 @@ export function SaleSummary({ detail }) {
         </div>
         <div className="serif bold" style={{ fontSize: 30 }}>{inr(s.grand_total)}</div>
         <div className="muted">{s.invoice_no}</div>
-        {s.gst_hidden ? <div className="badge mt">GST not shown on bill</div> : null}
+        {s.gst_hidden ? <div className="badge mt">{s.gst_hidden === 2 ? "No GST (branch)" : "GST not shown on bill"}</div> : null}
         {s.change > 0 && (
           <div className="badge gold mt" style={{ fontSize: 15, padding: "6px 12px" }}>
             Give back change {inr(s.change)}

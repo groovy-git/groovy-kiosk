@@ -2128,5 +2128,84 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("no sheet changed size during all of the above", grown.length === 0, grown);
 }
 
+// ---- a branch without GST (Settings → Branches → GST: Disabled) ----
+{
+    const gEnv = createEnv();
+    gEnv.ctx.setupSheets();
+    const gPwd = /Password: (\S+)/.exec(gEnv.alerts.pop())[1];
+    const GT = gEnv.call("login", { email: "owner@groovy.test", password: gPwd }).data.token;
+    const gc = (a, p, b) => gEnv.call(a, p, GT, b);
+    gc("saveSettings", { settings: { gstin: "27ABCDE1234F1Z5" } });
+    const gCat = gc("bootstrap", {}).data.catalog.categories[0].id;
+    gc("saveProduct", { name: "Gst Test", category_id: gCat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: 1180, sell_price: 1180, cost: 500, opening_stock: 20, barcode: "GT1" }] }, 1);
+    const GV = gc("getCatalog", {}, 1).data.variants.find((v) => v.barcode === "GT1").id;
+    const brList = () => gc("listBranches", {}).data;
+    check("existing branch: GST on by default", brList().every((b) => b.gst_off === 0), brList());
+    const NG = gc("saveBranch", { name: "No Gst Shop", code: "NG", gst_off: 1 }).data.id;
+    check("new branch saved with GST disabled", brList().find((b) => b.id === NG).gst_off === 1);
+    const NG2 = gc("saveBranch", { name: "Default Shop", code: "DS" }).data.id;
+    check("new branch without the option (older app): GST on", brList().find((b) => b.id === NG2).gst_off === 0);
+    gc("saveBranch", { id: NG, name: "No Gst Shop", code: "NG" }); // an older app edits it: doesn't send gst_off
+    check("editing without the option keeps GST disabled", brList().find((b) => b.id === NG).gst_off === 1);
+    check("the app gets it with the branches", gc("bootstrap", {}, 1).data.branches.find((b) => b.id === NG).gst_off === 1);
+    gc("stockIn", { lines: [{ variant_id: GV, qty: 20, unit_cost: 500 }] }, NG);
+    const sell = (b, extra) => gc("completeSale", Object.assign({ client_ref: "g" + Math.random(), lines: [{ variant_id: GV, qty: 1 }], payments: [{ method: "cash", amount: 1180 }], customer: { name: "Biz", phone: "9811100011", gstin: "27BBBBB2222B1Z2" } }, extra || {}), b);
+    const onBill = sell(1).data;
+    const offBill = sell(NG, { gst_hidden: false }).data; // the app said "show GST": the branch decides
+    check("GST branch: bill as before (taxable 1000 + CGST 90 + SGST 90)", onBill.sale.gst_hidden === 0 && onBill.sale.taxable === 1000 && onBill.sale.cgst === 90 && onBill.sale.sgst === 90, onBill.sale);
+    check("no-GST branch: marked as such whatever the app sent", offBill.sale.gst_hidden === 2, offBill.sale.gst_hidden);
+    check("no-GST branch: recorded with no GST (taxable = total, CGST/SGST 0)", offBill.sale.taxable === 1180 && offBill.sale.cgst === 0 && offBill.sale.sgst === 0, offBill.sale);
+    check("no-GST branch: its lines at 0% with no tax, HSN kept", offBill.items.every((i) => i.gst_rate === 0 && i.tax === 0 && i.taxable === i.line_total), offBill.items);
+    check("the customer pays exactly the same", offBill.sale.grand_total === onBill.sale.grand_total && offBill.sale.grand_total === 1180);
+    check("GST branch: unticking 'Show GST on bill' still works as before", sell(1, { gst_hidden: true }).data.sale.gst_hidden === 1);
+    const offPdf = require("vm").runInContext(`resetReqCache_(); invoicePdfHtml_(saleDetail_(findById_("Sales", ${offBill.sale.id}), null))`, gEnv.ctx);
+    check("no-GST branch bill PDF: no GSTIN, State, CGST or HSN", !/GSTIN|State:|CGST|HSN|TAX INVOICE/.test(offPdf) && />INVOICE</.test(offPdf));
+    // returns follow their bill
+    const rOn = gc("returnItems", { sale_id: onBill.sale.id, items: [{ sale_item_id: onBill.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "t" }, 1).data;
+    const rOff = gc("returnItems", { sale_id: offBill.sale.id, items: [{ sale_item_id: offBill.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "t" }, NG).data;
+    const retRow = (id) => require("vm").runInContext(`resetReqCache_(); JSON.stringify(rows_("Returns").find((r) => r.sale_id === ${id}))`, gEnv.ctx);
+    check("return on a no-GST bill: no tax, marked", JSON.parse(retRow(offBill.sale.id)).tax === 0 && JSON.parse(retRow(offBill.sale.id)).gst_off === 1, retRow(offBill.sale.id));
+    check("return on a GST bill: tax as before, not marked", JSON.parse(retRow(onBill.sale.id)).tax === 180 && JSON.parse(retRow(onBill.sale.id)).gst_off === 0, retRow(onBill.sale.id));
+    check("refunds are the full price either way", rOn.sale.refunded === 1180 && rOff.sale.refunded === 1180);
+    // a new bill at each branch for the reports (the first two are fully returned now)
+    const on2 = sell(1).data, off2 = sell(NG).data;
+    const gst = gc("report", { type: "gst_summary" }, 0).data;
+    const inGst = (inv) => gst.b2b.some((b) => b.invoice_no === inv);
+    check("GST report: no-GST branch bills left out (B2B)", !inGst(offBill.sale.invoice_no) && !inGst(off2.sale.invoice_no) && inGst(on2.sale.invoice_no), gst.b2b.map((b) => b.invoice_no));
+    check("GST report: totals only from GST branch bills", gst.totals.cgst === 90 * 3 && gst.totals.taxable === 3000, gst.totals);
+    check("GST report: no 0% rate row from the no-GST branch", gst.by_rate.every((r) => r.rate === 18), gst.by_rate);
+    check("GST report: credit notes only from GST bills", gst.credit_notes_by_rate.length === 1 && gst.credit_notes_by_rate[0].tax === 180, gst.credit_notes_by_rate);
+    const reg = gc("report", { type: "sales_register" }, 0).data;
+    const regOff = reg.rows.find((r) => r.invoice_no === off2.sale.invoice_no);
+    check("sales register: no-GST bill listed with 0 GST", !!regOff && regOff.cgst === 0 && regOff.taxable === 1180, regOff);
+    const prof = gc("report", { type: "profit" }, 0).data;
+    // 3 GST bills (180 GST each) less 1 GST return; 2 no-GST bills at 1180 in full, one of them returned
+    check("profit: no-GST bills count in full, no GST collected on them", prof.gst_collected === 180 * 3 - 180 && prof.revenue_ex_gst === 1000 * 3 - 1000 + 1180 * 2 - 1180, { gst: prof.gst_collected, revenue: prof.revenue_ex_gst });
+    // turning GST back on: new bills get GST again, old ones stay as they were made
+    gc("saveBranch", { id: NG, name: "No Gst Shop", code: "NG", gst_off: 0 });
+    const backOn = sell(NG).data;
+    check("GST turned back on: new bill normal again", backOn.sale.gst_hidden === 0 && backOn.sale.cgst === 90 && backOn.items[0].gst_rate === 18, backOn.sale);
+    check("...earlier no-GST bills keep how they were made", gc("getSale", { id: off2.sale.id }, NG).data.sale.gst_hidden === 2);
+    gc("saveBranch", { id: NG, name: "No Gst Shop", code: "NG", gst_off: 1 });
+    // an exchange at a no-GST branch makes a no-GST bill
+    const xb = sell(NG).data;
+    const xch = gc("exchange", { client_ref: "gx1", sale_id: xb.sale.id, items: [{ sale_item_id: xb.items[0].id, qty: 1, restock: true }], reason: "swap", lines: [{ variant_id: GV, qty: 1 }], payments: [], refund_method: "cash" }, NG);
+    check("exchange at a no-GST branch: new bill has no GST", xch.success && xch.data.sale.gst_hidden === 2 && xch.data.sale.cgst === 0, xch.message || xch.data.sale);
+    // a sheet from before this version: asks for Setup; Setup adds the column; branches stay GST-on
+    const brSh = gEnv.ss.getSheetByName("Branches");
+    const brCols = Object.keys(require("vm").runInContext("SCHEMA.Branches", gEnv.ctx)).length;
+    const retSh = gEnv.ss.getSheetByName("Returns");
+    const retCols = Object.keys(require("vm").runInContext("SCHEMA.Returns", gEnv.ctx)).length;
+    const keptBr = brSh.getRange(2, brCols, brSh.getLastRow() - 1, 1).getValues();
+    brSh.getRange(1, brCols, brSh.getLastRow(), 1).setValues(brSh.getRange(1, brCols, brSh.getLastRow(), 1).getValues().map(() => [""]));
+    retSh.getRange(1, retCols).setValue("");
+    const stale = gc("getCatalog", {}, 1);
+    check("older sheet without the new columns asks for Setup", !stale.success && stale.code === "SETUP", stale);
+    gEnv.ctx.setupSheets();
+    check("Setup adds the columns back", gc("getCatalog", {}, 1).success && brSh.getRange(1, brCols).getValue() === "gst_off" && retSh.getRange(1, retCols).getValue() === "gst_off");
+    check("...and every branch reads as GST on (blank)", brList().every((b) => b.gst_off === 0), brList());
+    brSh.getRange(2, brCols, keptBr.length, 1).setValues(keptBr);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

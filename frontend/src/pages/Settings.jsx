@@ -366,12 +366,13 @@ function BranchesSettings() {
                   {b.code || ""}/26-27/00001{b.address ? " · " + b.address : ""}
                 </div>
               </div>
+              {b.gst_off ? <span className="badge">No GST</span> : null}
               {!b.active && <span className="badge">Inactive</span>}
             </button>
           ))}
         </div>
       )}
-      <button className="btn secondary block mt" onClick={() => setEdit({ name: "", code: "", address: "", phone: "", report_emails: "", active: 1 })}>
+      <button className="btn secondary block mt" onClick={() => setEdit({ name: "", code: "", address: "", phone: "", report_emails: "", active: 1, gst_off: 0 })}>
         <Plus size={18} /> Add branch
       </button>
       {edit && (
@@ -428,6 +429,15 @@ function BranchSheet({ b, prefix, onClose, onSaved }) {
       <Field label="Day-close emails for this branch" hint="e.g. the branch manager. The owner list in Settings → Email also gets every branch.">
         <input className="input" inputMode="email" value={f.report_emails} onChange={(e) => setF({ ...f, report_emails: e.target.value })} placeholder="manager@gmail.com" />
       </Field>
+      <div className="field">
+        <label>GST</label>
+        <Seg value={f.gst_off ? 0 : 1} onChange={(v) => setF({ ...f, gst_off: v ? 0 : 1 })} options={[{ value: 1, label: "Enabled" }, { value: 0, label: "Disabled" }]} />
+        <div className="hint">
+          {f.gst_off
+            ? "This branch bills without GST: no GST on its bills, and they are left out of GST reports. Prices stay the same."
+            : "Bills show GST as usual (checkout can still leave it off a single bill)."}
+        </div>
+      </div>
       {b.id && (
         <div className="field">
           <label>Status</label>

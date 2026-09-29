@@ -59,7 +59,7 @@ export default function SaleDetail({ id }) {
             </div>
             <div className="col gap-s" style={{ alignItems: "flex-end" }}>
               <span className={"badge " + st.cls}>{st.label}</span>
-              {s.gst_hidden ? <span className="badge">GST not shown on bill</span> : null}
+              {s.gst_hidden ? <span className="badge">{s.gst_hidden === 2 ? "No GST (branch)" : "GST not shown on bill"}</span> : null}
               {multiBranch && d.branch ? <span className="badge gold">{d.branch.name}</span> : null}
             </div>
           </div>

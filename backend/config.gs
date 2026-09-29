@@ -78,6 +78,7 @@ const SCHEMA = {
         total: "n", taxable: "n", tax: "n", refund_method: "s", reason: "s", user_id: "n", at: "d",
         branch_id: "n",
         pdf_url: "s", // credit note PDF in Drive
+        gst_off: "n", // 1 = against a bill made at a branch without GST: left out of GST reports
     },
     Return_Items: {
         id: "n", return_id: "n", sale_item_id: "n", variant_id: "n", qty: "n", amount: "n",
@@ -95,6 +96,7 @@ const SCHEMA = {
     // shops; code goes into invoice numbers (blank = original shop keeps GF/26-27/00001 series)
     Branches: {
         id: "n", name: "s", code: "s", address: "s", phone: "s", report_emails: "s", active: "n", created_at: "d",
+        gst_off: "n", // 1 = branch not GST-registered: its bills carry no GST. Blank/0 = GST on (every older branch)
     },
     Branch_Stock: { variant_id: "n", branch_id: "n", qty: "n" },
     Transfers: {

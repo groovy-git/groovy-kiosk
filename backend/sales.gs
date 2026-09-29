@@ -75,6 +75,9 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
     const bmap = indexBy_(rows_("Brands"), "id");
     const allowNeg = s.allow_negative_stock === "yes";
 
+    // a branch without GST bills at 0%: prices include GST, so the customer pays the same — the whole line
+    // is the taxable value, no CGST/SGST (and the bill is left out of GST reports)
+    const gstOff = branchGstOff_(branch);
     const priced = lines.map((l) => {
         const v = vmap[l.variant_id];
         const prod = v && pmap[v.product_id];
@@ -86,7 +89,7 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
         const have = r3_(stockOf_(v.id, branch) + ((opts && opts.extraStock && opts.extraStock[v.id]) || 0));
         if (!allowNeg && l.qty > have) fail_("Only " + have + " " + (v.unit === "ml" ? "ml" : "pcs") + " of " + label + " in stock at " + branchName_(branch));
         return {
-            variant_id: v.id, qty: l.qty, discount: l.discount, price: v.sell_price, gst_rate: prod.gst_rate,
+            variant_id: v.id, qty: l.qty, discount: l.discount, price: v.sell_price, gst_rate: gstOff ? 0 : prod.gst_rate,
             _v: v, _prod: prod, _brand: bmap[prod.brand_id] ? bmap[prod.brand_id].name : "",
         };
     });
@@ -143,7 +146,7 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
         gross: bill.gross, item_disc: bill.item_disc, bill_disc: bill.bill_disc, taxable: bill.taxable,
         cgst: bill.cgst, sgst: bill.sgst, round_off: bill.round_off, grand_total: bill.grand_total,
         tendered, change, refunded: 0, status: "completed", notes: str_(p.notes).slice(0, 300), updated_at: now,
-        gst_hidden: p.gst_hidden ? 1 : 0,
+        gst_hidden: gstOff ? GST_OFF_BRANCH_ : p.gst_hidden ? 1 : 0, // decided here, whatever the app sent
         branch_id: branch,
     };
 
@@ -404,6 +407,7 @@ function returnItemsLocked_(p, ctx, method, reason, req, branch, opts) {
             id: retId, credit_note_no: cn, fy, sale_id: s.id, invoice_no: s.invoice_no, salesman_id: s.salesman_id,
             total, taxable, tax: r2_(total - taxable), refund_method: method, reason, user_id: ctx.user.id, at: now,
             branch_id: branch,
+            gst_off: s.gst_hidden === GST_OFF_BRANCH_ ? 1 : 0, // follows its bill (no GST there, none here)
         },
     ]);
     appendRows_("Return_Items", retItems);
