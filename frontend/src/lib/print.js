@@ -245,14 +245,34 @@ export function printHtml(html) {
   printInFrame(html);
 }
 
+// on the screen only, never on paper: a way back to the app once the print sheet is closed
+const BACK_BAR = `<style>
+    #gp-bar { position: sticky; top: 0; z-index: 9; display: flex; gap: 8px; align-items: center; padding: 8px; margin: 0 0 10px; background: #654321; font: 14px/1.2 Helvetica, Arial, sans-serif; }
+    #gp-bar button { padding: 9px 12px; border: 0; border-radius: 8px; background: #f5bf03; color: #2b2520; font: bold 14px Helvetica, Arial, sans-serif; }
+    #gp-bar #gp-print { background: #fff; }
+    #gp-bar span { color: #fff; }
+    @media print { #gp-bar { display: none !important; } }
+  </style><div id="gp-bar"><button id="gp-back" type="button">← Back to app</button><button id="gp-print" type="button">Print again</button><span id="gp-hint"></span></div>`;
+
 // opened right inside the tap, so the browser doesn't block it; false if it was blocked anyway
 function printInNewTab(html) {
   const w = window.open("", "_blank");
   if (!w) return false;
   const doc = w.document;
   doc.open();
-  doc.write(html);
+  doc.write(html.replace(/<body[^>]*>/, (b) => b + BACK_BAR));
   doc.close();
+  const back = doc.getElementById("gp-back");
+  const again = doc.getElementById("gp-print");
+  if (back) back.addEventListener("click", () => {
+    w.close();
+    // a browser that won't close the tab: say where the app is
+    setTimeout(() => {
+      const hint = !w.closed && doc.getElementById("gp-hint");
+      if (hint) hint.textContent = "Switch to the Groovy POS tab";
+    }, 400);
+  });
+  if (again) again.addEventListener("click", () => w.print());
   setTimeout(() => {
     w.focus();
     w.print();
