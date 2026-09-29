@@ -234,7 +234,33 @@ export function a4InvoiceHtml(d, s) {
   return a4Page(s, showGst && s.gstin ? "TAX INVOICE" : "INVOICE", sale.status === "voided" ? "VOIDED" : "", body);
 }
 
+// An iPhone/iPad *browser tab* (every browser there is Apple's WebKit, Chrome too) ignores printing a
+// hidden frame and prints the app screen instead, so there the bill opens as a page of its own and prints
+// itself. The installed app, Android and computers keep the hidden frame, which prints the bill there.
+const isInstalledApp = () => window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
+const isIPhoneOrIPad = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
 export function printHtml(html) {
+  if (isIPhoneOrIPad() && !isInstalledApp() && printInNewTab(html)) return;
+  printInFrame(html);
+}
+
+// opened right inside the tap, so the browser doesn't block it; false if it was blocked anyway
+function printInNewTab(html) {
+  const w = window.open("", "_blank");
+  if (!w) return false;
+  const doc = w.document;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  setTimeout(() => {
+    w.focus();
+    w.print();
+  }, 350);
+  return true;
+}
+
+function printInFrame(html) {
   const f = document.createElement("iframe");
   f.setAttribute("aria-hidden", "true");
   f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;";
