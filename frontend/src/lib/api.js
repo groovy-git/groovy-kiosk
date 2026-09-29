@@ -42,16 +42,18 @@ const newReqId = () => {
  * Every action is therefore retried with the same req_id: the server returns the saved reply of a
  * write that already happened instead of doing it again.
  */
-// reads can be asked again safely, so they give up sooner; a save is given longer before it is retried
-const READS = /^(bootstrap|getCatalog|getStock|dashboard|listSales|getSale|report|listCustomers|findCustomer|listHeld|movements|listExpenses|listUsers|listLogs|customerHistory|listSellers|getSettings|stockInBatches|listTransfers|listBranches|me|ping)$/;
+// Every try is given 45 s — the time Google takes to run the action plus the time to fetch its answer.
+// Reads used to get only 20 s, but on a slow day Google often answers after 20–33 s (measured, even for
+// a ping): giving up there made Google do the whole job again (a catalogue load was cancelled three
+// times in one 88-second login). Waiting once is quicker than starting over.
+const TRY_MS = 45000;
 
 export async function api(action, payload = {}) {
   if (!API_URL) throw new ApiError("App not configured: VITE_API_URL is missing.", "CONFIG");
   if (!navigator.onLine) throw new ApiError("You're offline. Check the internet and try again.", "OFFLINE");
   const body = JSON.stringify({ action, token: getToken(), branch_id: getBranch(), req_id: newReqId(), payload });
-  const isRead = READS.test(action);
   const attempts = 3;
-  const timeout = isRead ? 20000 : 45000;
+  const timeout = TRY_MS;
   let lastStatus = 0;
   for (let i = 0; i < attempts; i++) {
     let json = null;
