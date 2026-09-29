@@ -11,7 +11,9 @@ const METHODS = ["upi", "cash", "card"]; // UPI first: most customers pay that w
 
 export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   const { cart, setCart, clearCart, sellers, user, role, settings, toast, patchStock, catalog, online } = useApp();
-  const [discMode, setDiscMode] = useState("rs");
+  // bill discount in % by default (the shop's usual); a discount already on the bill is kept in rupees in the
+  // cart, so it reopens in ₹ showing that exact amount — never re-read as a percentage
+  const [discMode, setDiscMode] = useState(cart.bill_disc ? "rs" : "pct");
   const [discText, setDiscText] = useState("");
   const total = preview.grand_total;
   const swap = cart.exchange || null;
@@ -36,7 +38,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
     if (!open) return;
     setPays([{ method: "upi", amount: String(due), reference: "", auto: true }]);
     setDiscText(cart.bill_disc ? String(cart.bill_disc) : "");
-    setDiscMode("rs");
+    setDiscMode(cart.bill_disc ? "rs" : "pct");
     setShowGstin(!!cust.gstin);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
