@@ -37,6 +37,7 @@ export default function SaleDetail({ id }) {
 
   const s = d.sale;
   const st = STATUS[s.status] || STATUS.completed;
+  const showGst = !s.gst_hidden; // a bill printed without GST shows none here either — like its receipt / A4 / PDF
   const text = billText(d, shop);
   const canReturn = (isManager || returnCapOf(settings) > 0) && (s.status === "completed" || s.status === "part_returned");
   const canExchange = s.status === "completed" || s.status === "part_returned";
@@ -65,7 +66,7 @@ export default function SaleDetail({ id }) {
           <div className="divider" />
           <div className="kv small"><span className="k">Served by</span><b>{s.salesman_name}</b></div>
           <div className="kv small"><span className="k">Customer</span><span>{s.customer_name || "Walk-in"} {s.customer_phone}</span></div>
-          {s.customer_gstin && <div className="kv small"><span className="k">GSTIN</span><span>{s.customer_gstin}</span></div>}
+          {showGst && s.customer_gstin && <div className="kv small"><span className="k">GSTIN</span><span>{s.customer_gstin}</span></div>}
           {s.notes && <div className="kv small"><span className="k">Note</span><span>{s.notes}</span></div>}
         </div>
 
@@ -77,7 +78,8 @@ export default function SaleDetail({ id }) {
                 <div className="title">{i.product_name} <span className="muted">{i.size}</span></div>
                 <div className="sub">
                   {qtyLabel(i.qty, i.unit)} × {inr(i.price, { paise: i.unit === "ml" })}
-                  {i.discount + i.bill_disc_share > 0 && ` · disc ${inr(r2(i.discount + i.bill_disc_share))}`} · GST {i.gst_rate}%
+                  {i.discount + i.bill_disc_share > 0 && ` · disc ${inr(r2(i.discount + i.bill_disc_share))}`}
+                  {showGst && ` · GST ${i.gst_rate}%`}
                   {i.returned_qty > 0 && <span className="bad-text"> · returned {qtyLabel(i.returned_qty, i.unit)}</span>}
                 </div>
               </div>
@@ -89,8 +91,8 @@ export default function SaleDetail({ id }) {
         <div className="card mt">
           <div className="kv"><span className="k">Items total</span><span>{inr(s.gross)}</span></div>
           {s.item_disc + s.bill_disc > 0 && <div className="kv"><span className="k">Discount</span><span className="ok-text">−{inr(r2(s.item_disc + s.bill_disc))}</span></div>}
-          <div className="kv"><span className="k">Taxable value</span><span>{inr(s.taxable, { paise: true })}</span></div>
-          <div className="kv"><span className="k">CGST + SGST</span><span>{inr(r2(s.cgst + s.sgst), { paise: true })}</span></div>
+          {showGst && <div className="kv"><span className="k">Taxable value</span><span>{inr(s.taxable, { paise: true })}</span></div>}
+          {showGst && <div className="kv"><span className="k">CGST + SGST</span><span>{inr(r2(s.cgst + s.sgst), { paise: true })}</span></div>}
           {s.round_off !== 0 && <div className="kv"><span className="k">Round off</span><span>{inr(s.round_off, { paise: true })}</span></div>}
           <div className="kv total"><span>Total</span><span>{inr(s.grand_total)}</span></div>
           {d.payments.map((p) => (
