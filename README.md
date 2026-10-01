@@ -1,6 +1,6 @@
 # Groovy Kiosk
 
-A mobile-first billing and stock app for the Groovy Fragrances kiosks. It handles billing with barcode scanning, loose attar sold by ml or tola, GST invoices, split payments, stock, expenses, and reports that show each salesperson's sales.
+A mobile-first billing and stock app for the Groovy kiosks. It handles billing with barcode scanning, loose attar sold by ml or tola, GST invoices, split payments, stock, expenses, and reports that show each salesperson's sales.
 
 **How it fits together**
 
