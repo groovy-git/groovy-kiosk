@@ -1615,6 +1615,54 @@ nm2Old.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" }
 const NM2T = nm2Env.call("login", { email: "owner@groovy.test", password: nm2Pwd }).data.token;
 ok(nm2Env.call("uploadImage", { data: "cGhvdG8=", mime: "image/jpeg", name: "attar-2.jpg" }, NM2T), "upload before Setup has run");
 check("renamed app: an upload renames the old folder too", nm2Old.getName() === "GroovyKiosk_Images" && b2Count(nm2Old) === 2, { name: nm2Old.getName(), files: b2Count(nm2Old) });
+// the owner had filed the folder beside the Sheet, where a backup's copy of it is met first
+const nm3Env = createEnv();
+const nm3Drive = nm3Env.drive;
+const nm3Home = nm3Drive.root.createFolder("Groovy Kiosk");
+nm3Drive.sheetFile.parent = nm3Home;
+const nm3Copy = nm3Home.createFolder("Back_up").createFolder("2026-09-25 10-00").createFolder("GroovyPOS_Images");
+nm3Copy.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" });
+const nm3Old = nm3Home.createFolder("GroovyPOS_Images");
+nm3Old.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" });
+nm3Old.createFile({ name: "attar-2.jpg", mime: "image/jpeg", html: "photo two" });
+const nm3Id = nm3Old.getId();
+nm3Env.ctx.setupSheets();
+const nm3Pwd = /Password: (\S+)/.exec(nm3Env.alerts.pop())[1];
+check("renamed app: a photo folder filed beside the Sheet is renamed where it is",
+    nm3Old.getName() === "GroovyKiosk_Images" && nm3Old.getId() === nm3Id && nm3Old.parent === nm3Home && b2Count(nm3Old) === 2, nm3Old.getName());
+check("renamed app: the backup's copy, met first, is not the one renamed", nm3Copy.getName() === "GroovyPOS_Images" && b2Count(nm3Copy) === 1, nm3Copy.getName());
+const NM3T = nm3Env.call("login", { email: "owner@groovy.test", password: nm3Pwd }).data.token;
+ok(nm3Env.call("uploadImage", { data: "cGhvdG8=", mime: "image/jpeg", name: "attar-3.jpg" }, NM3T), "upload a photo, folder beside the Sheet");
+check("renamed app: the new photo joins the others, no folder appears at the top of Drive",
+    b2Count(nm3Old) === 3 && !nm3Drive.root.getFoldersByName("GroovyKiosk_Images").hasNext(), b2Count(nm3Old));
+// a full backup keeps a copy under the same name: the copy is never taken for the working folder
+const nm4Env = createEnv();
+const nm4Drive = nm4Env.drive;
+const nm4Home = nm4Drive.root.createFolder("Groovy Kiosk");
+nm4Drive.sheetFile.parent = nm4Home;
+const nm4Copy = nm4Home.createFolder("Back_up").createFolder("2026-10-01 09-00").createFolder("GroovyKiosk_Images");
+nm4Copy.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" });
+const nm4Live = nm4Drive.root.createFolder("GroovyKiosk_Images");
+nm4Live.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" });
+nm4Live.createFile({ name: "attar-2.jpg", mime: "image/jpeg", html: "photo two" });
+nm4Env.ctx.setupSheets();
+const nm4Pwd = /Password: (\S+)/.exec(nm4Env.alerts.pop())[1];
+const NM4T = nm4Env.call("login", { email: "owner@groovy.test", password: nm4Pwd }).data.token;
+ok(nm4Env.call("uploadImage", { data: "cGhvdG8=", mime: "image/jpeg", name: "attar-3.jpg" }, NM4T), "upload a photo with a backup copy about");
+check("a photo is never uploaded into a backup's copy", b2Count(nm4Live) === 3 && b2Count(nm4Copy) === 1, { live: b2Count(nm4Live), copy: b2Count(nm4Copy) });
+check("the photo count is the working folder's", nm4Env.ctx.countProductImages_() === 3, nm4Env.ctx.countProductImages_());
+// a photo folder in Drive's bin is not the photo folder
+const nm5Env = createEnv();
+nm5Env.ctx.setupSheets();
+const nm5Pwd = /Password: (\S+)/.exec(nm5Env.alerts.pop())[1];
+const nm5Binned = nm5Env.drive.root.createFolder("GroovyKiosk_Images");
+nm5Binned.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" });
+nm5Binned.setTrashed(true);
+const NM5T = nm5Env.call("login", { email: "owner@groovy.test", password: nm5Pwd }).data.token;
+ok(nm5Env.call("uploadImage", { data: "cGhvdG8=", mime: "image/jpeg", name: "attar-2.jpg" }, NM5T), "upload a photo with the old folder in the bin");
+const nm5Fresh = nm5Env.drive.root.getFoldersByName("GroovyKiosk_Images");
+check("a binned photo folder is left in the bin, the photo goes to a fresh one",
+    b2Count(nm5Binned) === 1 && nm5Fresh.hasNext() && b2Count(nm5Fresh.next()) === 1, b2Count(nm5Binned));
 
 const countLiveImages = (folder) => { let n = 0; const it = folder.getFiles(); while (it.hasNext()) { if (!it.next().trashed) n++; } return n; };
 // ---- a reset clears the Drive files of what it deleted, and never touches Back_up ----

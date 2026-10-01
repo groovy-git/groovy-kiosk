@@ -192,7 +192,8 @@ function createDrive() {
         getRootFolder: () => root,
         getFileById: byId,
         getFolderById: byId,
-        getFoldersByName: (n) => iter([...items.values()].filter((x) => x.kind === "folder" && x.name === n && !x.trashed)),
+        // Drive-wide, and like the real one it hands back folders in the bin too
+        getFoldersByName: (n) => iter([...items.values()].filter((x) => x.kind === "folder" && x.name === n)),
         createFolder: (n) => make("folder", n, root),
         Access: { ANYONE_WITH_LINK: "anyone" }, Permission: { VIEW: "view" },
     };

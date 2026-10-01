@@ -106,10 +106,11 @@ function copyInvoiceMonth_(ym, dest, inTime) {
 /**
  * Copy the product photos taken in the app.
  *
- * They live in their own folder at the top of Drive, not beside the sheet ([catalog.gs] uploads them
- * there), and the catalogue only stores a link to each one — so without this a restored shop would
- * come back with its photos pointing at a folder that might no longer exist. Photos imported from the
- * website are links to the website and were never in Drive, so they are not here to copy.
+ * They live in their own folder, made at the top of Drive unless the owner filed it elsewhere
+ * (imageFolder_ in [catalog.gs] finds it), and the catalogue only stores a link to each one — so
+ * without this a restored shop would come back with its photos pointing at a folder that might no
+ * longer exist. Photos imported from the website are links to the website and were never in Drive,
+ * so they are not here to copy.
  *
  * Returns how many were copied and whether it got to the end before the time ran out.
  */

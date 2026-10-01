@@ -440,17 +440,38 @@ function apiGenerateBarcode_(p, ctx) {
 /* ---------- images (Drive) ---------- */
 
 /**
- * The product-photo folder at the top of Drive. One made while the app was called Groovy POS is
- * renamed in place: a Drive folder keeps its id through a rename and a product stores only its
- * photo's file id, so every photo keeps showing. The old name is looked for at the top of Drive
- * only — the copies inside Back_up carry that name too, and those stay as they are.
+ * The product-photo folder. It is made at the top of Drive, but the owner may have filed it somewhere
+ * else (beside the Sheet, say), so it is looked for by name anywhere in Drive — except in the bin and
+ * inside Back_up, where every full backup keeps a copy under the very same name.
+ *
+ * One made while the app was called Groovy POS is renamed where it sits: a Drive folder keeps its id
+ * through a rename and a product stores only its photo's file id, so every photo keeps showing.
  */
 function imageFolder_(create) {
-    const it = DriveApp.getFoldersByName(APP.IMAGE_FOLDER);
-    if (it.hasNext()) return it.next();
-    const old = DriveApp.getRootFolder().getFoldersByName(APP.IMAGE_FOLDER_OLD);
-    if (old.hasNext()) return old.next().setName(APP.IMAGE_FOLDER);
+    const working = (name) => {
+        const it = DriveApp.getFoldersByName(name);
+        while (it.hasNext()) {
+            const f = it.next();
+            if (!f.isTrashed() && !insideBackup_(f)) return f;
+        }
+        return null;
+    };
+    const now = working(APP.IMAGE_FOLDER);
+    if (now) return now;
+    const old = working(APP.IMAGE_FOLDER_OLD);
+    if (old) return old.setName(APP.IMAGE_FOLDER);
     return create ? DriveApp.createFolder(APP.IMAGE_FOLDER) : null;
+}
+
+/** True for anything under a Back_up folder — a backup's copy, never the one the app works in. */
+function insideBackup_(folder) {
+    let parents = folder.getParents();
+    while (parents.hasNext()) {
+        const p = parents.next();
+        if (p.getName() === BACKUP_ROOT_) return true;
+        parents = p.getParents();
+    }
+    return false;
 }
 
 function apiUploadImage_(p, ctx) {
