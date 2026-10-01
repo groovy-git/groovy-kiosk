@@ -2288,5 +2288,87 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     brSh.getRange(2, brCols, keptBr.length, 1).setValues(keptBr);
 }
 
+// ---- a stock mover carries stock between branches: products and stock, never sales ----
+{
+    const mEnv = createEnv();
+    mEnv.ctx.setupSheets();
+    const mPwd = /Password: (\S+)/.exec(mEnv.alerts.pop())[1];
+    const MT = mEnv.call("login", { email: "owner@groovy.test", password: mPwd }).data.token;
+    const oc = (a, p, b) => mEnv.call(a, p, MT, b);
+    const B2 = oc("saveBranch", { name: "Second Shop", code: "S2" }).data.id;
+    const B3 = oc("saveBranch", { name: "Third Shop", code: "S3" }).data.id;
+    const mCat = oc("bootstrap", {}).data.catalog.categories[0].id;
+    oc("saveProduct", { name: "Mover Test", category_id: mCat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: 500, sell_price: 450, cost: 200, opening_stock: 20, barcode: "MV1" }] }, 1);
+    const MV = oc("getCatalog", {}, 1).data.variants.find((v) => v.barcode === "MV1").id;
+    const stockAtM = (b) => oc("getCatalog", {}, b).data.variants.find((v) => v.id === MV).stock_qty;
+
+    // Mo works at the first two branches, not the third
+    const moSaved = oc("saveUser", { name: "Mover Mo", email: "mover@x.in", role: "stock_mover", password: "secret1", branch_id: 1, branch_ids: [1, B2] });
+    check("the owner can add a stock mover", moSaved.success && moSaved.data.role === "stock_mover", moSaved);
+    check("an unknown role is still refused", !oc("saveUser", { name: "Nope", email: "nope-mv@x.in", role: "boss", password: "secret2" }).success);
+    const samId = oc("saveUser", { name: "Seller Sam", email: "sam-mv@x.in", role: "salesperson", password: "secret3", branch_id: 1 }).data.id;
+    const SAM = mEnv.call("login", { email: "sam-mv@x.in", password: "secret3" }).data.token;
+    const moLogin = mEnv.call("login", { email: "mover@x.in", password: "secret1" });
+    check("a stock mover can log in, and is reported as one", moLogin.success && moLogin.data.user.role === "stock_mover", moLogin);
+    check("...limited to the branches ticked for them", moLogin.data.user.branch_ids.join() === [1, B2].join() && moLogin.data.user.home_branch_id === 1, moLogin.data.user);
+    const MO = moLogin.data.token;
+    const mv = (a, p, b) => mEnv.call(a, p, MO, b);
+
+    // what they are sent: products, prices and stock at every branch — no cost, no sellers
+    const moBoot = mv("bootstrap", {}, 1);
+    check("stock mover: the app's first load works", moBoot.success, moBoot.message);
+    const moVar = moBoot.data.catalog.variants.find((v) => v.id === MV);
+    check("stock mover: sees selling price and MRP", moVar.sell_price === 450 && moVar.mrp === 500, moVar);
+    check("stock mover: never sees cost price", moBoot.data.catalog.variants.every((v) => v.avg_cost === undefined), Object.keys(moVar));
+    check("stock mover: sees stock here and at every branch", moVar.stock_qty === 20 && moVar.stock_by_branch[1] === 20, moVar);
+    check("stock mover: is not sent who sells", moBoot.data.sellers.length === 0, moBoot.data.sellers);
+    check("stock mover: stock refresh works", mv("getStock", {}, 1).data.changed[MV] === 20);
+    check("stock mover: a branch not ticked for them is refused", mv("getCatalog", {}, B3).code === "BRANCH");
+
+    // the one thing they do
+    const moTr = mv("transferStock", { to_branch_id: B2, note: "Weekend", lines: [{ variant_id: MV, qty: 5 }] }, 1);
+    check("stock mover: can send stock to another branch", moTr.success && /^TR\d{5}$/.test(moTr.data.transfer_no), moTr);
+    check("...and it leaves one branch and arrives at the other", stockAtM(1) === 15 && stockAtM(B2) === 5 && stockAtM(0) === 20, [stockAtM(1), stockAtM(B2)]);
+    check("...and cannot send more than the branch has", /Only 15/.test(mv("transferStock", { to_branch_id: B2, lines: [{ variant_id: MV, qty: 16 }] }, 1).message));
+    check("...nor out of a branch not ticked for them", mv("transferStock", { to_branch_id: 1, lines: [{ variant_id: MV, qty: 1 }] }, B3).code === "BRANCH");
+    check("...but may send to any active branch, as a manager may", mv("transferStock", { to_branch_id: B3, lines: [{ variant_id: MV, qty: 1 }] }, B2).success && stockAtM(B3) === 1);
+    const moList = mv("listTransfers", {}, 1);
+    check("stock mover: sees the branch's transfers", moList.success && moList.data.some((t) => t.id === moTr.data.id && t.user_name === "Mover Mo" && t.items[0].qty === 5), moList);
+    check("the transfer is in the owner's activity log under their name", oc("listLogs", {}).data.some((l) => l.action === "TRANSFER" && l.user_name === "Mover Mo"));
+
+    // everything else is closed, whatever the app shows: walk every action the server has
+    const moOpen = ["bootstrap", "me", "logout", "changePassword", "getSettings", "getCatalog", "getStock", "transferStock", "listTransfers"];
+    const acts = mEnv.ctx.actions_();
+    const signedIn = Object.keys(acts).filter((a) => !acts[a].public);
+    const listed = signedIn.filter((a) => acts[a].roles.indexOf("stock_mover") >= 0);
+    check("stock mover: listed on those nine actions and no other", listed.sort().join() === moOpen.slice().sort().join(), listed);
+    const leaks = signedIn.filter((a) => moOpen.indexOf(a) < 0 && mv(a, {}, 1).code !== "FORBIDDEN");
+    check("stock mover: every other action is refused", leaks.length === 0, leaks);
+    ["dashboard", "listSales", "getSale", "report", "movements", "listCustomers", "customerHistory", "listExpenses", "completeSale", "stockIn", "adjustStock", "stockInBatches", "emailDayClose", "listSellers"].forEach((a) =>
+        check("stock mover refused: " + a, mv(a, {}, 1).code === "FORBIDDEN"));
+
+    // the other three roles are where they were on those nine actions
+    const three = (a) => acts[a].roles.filter((r) => r !== "stock_mover").join();
+    check("those actions are still open to owner, manager and salesperson", moOpen.slice(0, 7).every((a) => three(a) === "owner,manager,salesperson"), moOpen.slice(0, 7).map(three));
+    check("transfers are still closed to a salesperson", three("transferStock") === "owner,manager" && three("listTransfers") === "owner,manager"
+        && mEnv.call("transferStock", { to_branch_id: B2, lines: [{ variant_id: MV, qty: 1 }] }, SAM, 1).code === "FORBIDDEN");
+
+    // never a name to bill under
+    const soldBy = oc("listSellers", {}, 1).data;
+    check("a stock mover is not offered under Sold by", soldBy.every((u) => u.name !== "Mover Mo") && soldBy.some((u) => u.name === "Seller Sam"), soldBy);
+    const bill = (ref, extra, token) => mEnv.call("completeSale", Object.assign({ client_ref: ref, lines: [{ variant_id: MV, qty: 1 }], payments: [{ method: "cash", amount: 450 }] }, extra || {}), token || MT, 1);
+    const asMover = bill("mv-1", { salesman_id: moSaved.data.id });
+    check("a bill cannot be made under a stock mover's name", !asMover.success && /stock mover/.test(asMover.message), asMover.message);
+    check("...and nothing was written for it", stockAtM(1) === 15);
+    check("billing under a salesperson's name is as before", bill("mv-2", { salesman_id: samId }).data.sale.salesman_name === "Seller Sam" && bill("mv-3", {}, SAM).success);
+
+    // a role change takes effect on the very next request, either way
+    oc("saveUser", { id: samId, name: "Seller Sam", email: "sam-mv@x.in", role: "stock_mover", branch_id: 1 });
+    check("a salesperson made a stock mover stops selling at once", bill("mv-4", {}, SAM).code === "FORBIDDEN" && mEnv.call("dashboard", {}, SAM, 1).code === "FORBIDDEN");
+    check("...and can move stock", mEnv.call("listTransfers", {}, SAM, 1).success);
+    oc("saveUser", { id: samId, name: "Seller Sam", email: "sam-mv@x.in", role: "salesperson", branch_id: 1 });
+    check("made a salesperson again, they sell and cannot move stock", bill("mv-5", {}, SAM).success && mEnv.call("listTransfers", {}, SAM, 1).code === "FORBIDDEN");
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

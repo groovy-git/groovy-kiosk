@@ -16,20 +16,21 @@ import CameraScanner from "../components/CameraScanner";
 import { Button, Chips, Empty, Field, SearchBar, Seg, Sheet, SkeletonList, StockBadge, Thumb, useConfirm } from "../components/ui";
 
 export default function Stock({ tab }) {
-  const { isManager, multiBranch } = useApp();
-  const t = isManager && (tab === "batches" || (tab === "transfers" && multiBranch)) ? tab : "products";
+  const { isManager, isMover, canTransfer, multiBranch } = useApp();
+  // a stock mover has the product list and the transfers, never what was bought in (it shows cost)
+  const t = (isManager && tab === "batches") || (canTransfer && tab === "transfers" && multiBranch) ? tab : "products";
   return (
     <>
-      <TopBar title={isManager ? "Stock" : "Products"} />
+      <TopBar title={canTransfer ? "Stock" : "Products"} />
       <div className="page">
-        {isManager && (
+        {(isManager || (isMover && multiBranch)) && (
           <div className="mb">
             <Seg
               value={t}
               onChange={(v) => navigate(v === "products" ? "stock" : "stock/" + v, { replace: true })}
               options={[
                 { value: "products", label: "Products" },
-                { value: "batches", label: multiBranch ? "Stock In" : "Stock In history" },
+                ...(isManager ? [{ value: "batches", label: multiBranch ? "Stock In" : "Stock In history" }] : []),
                 ...(multiBranch ? [{ value: "transfers", label: "Transfers" }] : []),
               ]}
             />
@@ -42,7 +43,7 @@ export default function Stock({ tab }) {
 }
 
 function Products() {
-  const { catalog, isManager, toast, multiBranch } = useApp();
+  const { catalog, isManager, isMover, toast, multiBranch } = useApp();
   const route = useRoute();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState(route.params.get("filter") || "all");
@@ -118,6 +119,11 @@ function Products() {
           </button>
         </div>
       )}
+      {isMover && multiBranch && (
+        <button className="btn dark block mt" onClick={() => navigate("stock/transfer")}>
+          <ArrowRightLeft size={18} /> Transfer stock
+        </button>
+      )}
 
       {q.trim().length > 0 && q.trim().length < MIN_SEARCH && (
         <div className="small muted mt center">Type at least {MIN_SEARCH} letters to search</div>
@@ -165,7 +171,7 @@ function Products() {
 }
 
 function ItemSheet({ item, onClose }) {
-  const { isManager, catalog, multiBranch, branches, branchId } = useApp();
+  const { isManager, isMover, catalog, multiBranch, branches, branchId } = useApp();
   const [adjust, setAdjust] = useState(false);
   const [moves, setMoves] = useState(null);
   const live = item ? catalog.byVariant.get(item.id) || item : null;
@@ -220,9 +226,12 @@ function ItemSheet({ item, onClose }) {
           </button>
         </div>
       )}
-      <button className="btn ghost block mt" onClick={loadMoves}>
-        <History size={17} /> Stock history
-      </button>
+      {/* the history names every sale of the item, which is not a stock mover's to see */}
+      {!isMover && (
+        <button className="btn ghost block mt" onClick={loadMoves}>
+          <History size={17} /> Stock history
+        </button>
+      )}
       {moves === "loading" && <SkeletonList rows={3} height={44} />}
       {Array.isArray(moves) && (moves.length === 0 ? <div className="muted small center">No movements yet</div> : (
         <div className="list">

@@ -268,9 +268,10 @@ export function MoneyInput({ value, onChange, placeholder = "0", ...rest }) {
   );
 }
 
-export function Seg({ options, value, onChange }) {
+// `wrap`: two to a row, for more choices than fit one line on a phone
+export function Seg({ options, value, onChange, wrap }) {
   return (
-    <div className="seg" role="tablist">
+    <div className={"seg" + (wrap ? " wrap" : "")} role="tablist">
       {options.map((o) => (
         <button key={o.value} role="tab" aria-selected={value === o.value} className={value === o.value ? "active" : ""} onClick={() => onChange(o.value)}>
           {o.label}

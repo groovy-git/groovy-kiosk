@@ -8,7 +8,7 @@ import { ROLE_LABEL } from "../lib/format";
 import TopBar, { Updating } from "../components/TopBar";
 import { Avatar, Button, Empty, Field, Seg, Sheet, SkeletonList, useConfirm } from "../components/ui";
 
-const ROLE_ORDER = { owner: 0, admin: 0, manager: 1, salesperson: 2 };
+const ROLE_ORDER = { owner: 0, admin: 0, manager: 1, salesperson: 2, stock_mover: 3 };
 
 export default function UsersPage() {
   const { toast, user, setSellers, branches, multiBranch } = useApp();
@@ -22,9 +22,9 @@ export default function UsersPage() {
     [],
     (e) => toast(e.message, "error"),
   );
-  // the "sold by" picker elsewhere in the app reads this
+  // the "sold by" picker elsewhere in the app reads this (a stock mover never sells, so is not in it)
   useEffect(() => {
-    if (list) setSellers(list.filter((u) => u.active).map((u) => ({ id: u.id, name: u.name, role: u.role })));
+    if (list) setSellers(list.filter((u) => u.active && u.role !== "stock_mover").map((u) => ({ id: u.id, name: u.name, role: u.role })));
   }, [list, setSellers]);
 
   // active first, then owners, managers, salespeople, then by name. An unknown role sorts last rather
@@ -48,6 +48,7 @@ export default function UsersPage() {
       <div className="page">
         <p className="small muted" style={{ marginTop: 0 }}>
           Everyone can sell. Managers also handle stock, returns, expenses and reports. Only the owner manages staff and settings.
+          {multiBranch && " A Stock Mover only moves stock between branches and sees no sales."}
         </p>
         {!list ? (
           <SkeletonList />
@@ -103,6 +104,8 @@ function UserSheet({ u, onClose, onSaved }) {
   }, [u]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!u) return null;
   const self = u.id === user.id;
+  // moving stock needs a second branch to move it to; someone already a stock mover keeps the choice
+  const moverChoice = multiBranch || u.role === "stock_mover" || f.role === "stock_mover";
 
   const run = async (action, payload, msg) => {
     setBusy(true);
@@ -146,12 +149,17 @@ function UserSheet({ u, onClose, onSaved }) {
         <Seg
           value={f.role}
           onChange={(r) => !self && setF({ ...f, role: r })}
+          wrap={moverChoice}
           options={[
             { value: "salesperson", label: "Salesperson" },
             { value: "manager", label: "Manager" },
             { value: "owner", label: "Owner" },
+            ...(moverChoice ? [{ value: "stock_mover", label: "Stock Mover" }] : []),
           ]}
         />
+        {f.role === "stock_mover" && (
+          <div className="hint">Sees products and stock, and moves stock between the branches ticked below. No sales, customers or reports.</div>
+        )}
       </div>
       {multiBranch && f.role !== "owner" && (
         <>

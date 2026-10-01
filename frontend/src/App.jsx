@@ -1,5 +1,5 @@
 import { Component, Suspense, useEffect } from "react";
-import { Home as HomeIcon, ShoppingBag, Receipt, Boxes, Menu, Users, BarChart3, Wallet, Settings as Cog, LogOut, UserCircle, History, Package } from "lucide-react";
+import { Home as HomeIcon, ShoppingBag, Receipt, Boxes, Menu, Users, BarChart3, Wallet, Settings as Cog, LogOut, UserCircle, History, Package, ArrowRightLeft } from "lucide-react";
 import { useApp } from "./store";
 import { useRoute, navigate } from "./lib/router";
 import { Toasts, Spinner, SkeletonList, Empty } from "./components/ui";
@@ -164,6 +164,10 @@ const ACCESS = {
   home: "all", sell: "all", sales: "all", customers: "all", more: "all", account: "all", reports: "all", stock: "all",
   expenses: "mgr", users: "owner", settings: "owner", logs: "owner",
 };
+// a stock mover's whole app: products with their stock, moving stock, and their own account.
+// Named one by one, so a screen added later stays closed to them until it is listed here.
+const MOVER_PAGES = ["stock", "more", "account"];
+const MOVER_STOCK_TABS = ["transfer", "transfers"];
 
 function Page({ route }) {
   const { page, parts } = route;
@@ -189,7 +193,7 @@ function Page({ route }) {
 }
 
 export default function App() {
-  const { user, booting, rawCatalog, online, isManager, isAdmin, logout, settings, branchId } = useApp();
+  const { user, booting, rawCatalog, online, isManager, isAdmin, isMover, multiBranch, logout, settings, branchId } = useApp();
   const route = useRoute();
   usePreloadScreens(!!user && !!rawCatalog);
   useHomeWhenLoggedOut(!user);
@@ -206,11 +210,18 @@ export default function App() {
     );
 
   const allowed = (p) => {
+    if (isMover) return MOVER_PAGES.includes(p);
     const a = ACCESS[p] || "all";
     return a === "all" || (a === "mgr" && isManager) || (a === "owner" && isAdmin);
   };
-  const page = allowed(route.page) ? route.page : "home";
-  const active = ["users", "settings", "logs", "account", "customers", "expenses", "reports"].includes(page) ? "more" : page;
+  const page = allowed(route.page) ? route.page : isMover ? "stock" : "home";
+  // inside Stock a mover has the product list, Transfer and the Transfers list; any other address
+  // (adding a product, Stock In) opens the product list
+  const moverTab = isMover && route.page === "stock" && MOVER_STOCK_TABS.includes(route.parts[1]) ? route.parts[1] : "";
+  const parts = isMover && page === "stock" ? ["stock", moverTab].filter(Boolean) : route.parts;
+  const section = ["users", "settings", "logs", "account", "customers", "expenses", "reports"].includes(page) ? "more" : page;
+  const active = moverTab === "transfer" ? "stock/transfer" : section;
+  const here = isMover ? active : page; // the sidebar's highlighted row
 
   const tabs = isManager
     ? [
@@ -241,6 +252,13 @@ export default function App() {
     isAdmin && { id: "logs", label: "Activity", icon: History },
   ].filter(Boolean);
 
+  // a stock mover's own, much shorter menus (Transfer needs a second branch to send to)
+  const moverSide = [
+    { id: "stock", label: "Stock", icon: Boxes },
+    multiBranch && { id: "stock/transfer", label: "Transfer", icon: ArrowRightLeft, center: true },
+  ].filter(Boolean);
+  const moverTabs = [...moverSide, { id: "more", label: "More", icon: Menu }];
+
   return (
     <div className="app">
       <nav className="sidebar" aria-label="Main">
@@ -252,8 +270,8 @@ export default function App() {
           </div>
         </div>
         <BranchChip />
-        {side.map((s) => (
-          <button key={s.id} className={page === s.id ? "active" : ""} onClick={() => navigate(s.id)}>
+        {(isMover ? moverSide : side).map((s) => (
+          <button key={s.id} className={here === s.id ? "active" : ""} onClick={() => navigate(s.id)}>
             <s.icon size={20} /> {s.label}
           </button>
         ))}
@@ -273,15 +291,15 @@ export default function App() {
         <ScreenGuard key={page}>
           <Suspense fallback={<PageLoading />}>
             {/* switching branch reloads the open screen with that branch's data */}
-            <Page key={branchId} route={{ ...route, page }} />
+            <Page key={branchId} route={{ ...route, page, parts }} />
           </Suspense>
         </ScreenGuard>
       </div>
 
       <nav className="bottomnav" aria-label="Main">
-        {tabs.map((t) =>
+        {(isMover ? moverTabs : tabs).map((t) =>
           t.center ? (
-            <button key={t.id} className={"sell-tab" + (active === t.id ? " active" : "")} onClick={() => navigate(t.id)} aria-label="Sell">
+            <button key={t.id} className={"sell-tab" + (active === t.id ? " active" : "")} onClick={() => navigate(t.id)} aria-label={t.label}>
               <span className="sell-circle">
                 <t.icon size={26} />
               </span>

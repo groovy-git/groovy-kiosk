@@ -11,11 +11,12 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
 
 - **All data lives in your Google Sheet.** GitHub only hosts the app's screens, not the data.
 - **Every request needs a login.** Roles and prices are always checked on the server, so a phone cannot change them.
-- **Three roles:**
+- **Four roles:**
     - **Owner**: everything.
     - **Manager**: stock, returns of any size, expenses, reports.
     - **Salesperson**: billing, with a discount limit, and returns up to a rupee limit you set.
-    - Everyone can sell, and every bill records who sold it.
+    - **Stock Mover**: sees products and stock at the branches you tick, and moves stock between branches. No billing, and no sales, customers, expenses or reports.
+    - Owner, managers and salespeople can all sell, and every bill records who sold it.
 
 ---
 

@@ -277,9 +277,12 @@ export function AppProvider({ children }) {
     async (email, password) => {
       const r = await api("login", { email, password, device: navigator.userAgent.slice(0, 100) });
       setToken(r.data.token);
-      const promise = api("dashboard");
-      promise.catch(() => {}); // a failure is Home's to deal with, when it takes this
-      loginDashboard = { branch: getBranch(), promise };
+      // a stock mover has no Home and no figures to fetch: the server would only refuse
+      if (r.data.user.role !== "stock_mover") {
+        const promise = api("dashboard");
+        promise.catch(() => {}); // a failure is Home's to deal with, when it takes this
+        loginDashboard = { branch: getBranch(), promise };
+      }
       setBooting(true); // "Loading your shop…" until products and settings arrive
       setUser(r.data.user);
       save("gp_user", r.data.user);
@@ -347,13 +350,16 @@ export function AppProvider({ children }) {
   }, []);
 
   const role = user ? OLD_ROLE_NAMES[user.role] || user.role : null;
+  const isManager = role === "owner" || role === "manager";
+  // carries stock between branches: sees products and stock, moves it, and nothing else
+  const isMover = role === "stock_mover";
   const multiBranch = branches.length > 1;
   const branch = branches.find((b) => b.id === branchId) || null;
   // branches this person can switch to (the owner: all)
   const myBranches = !user ? [] : role === "owner" ? branches : branches.filter((b) => (user.branch_ids || []).includes(b.id));
 
   const value = {
-    user, role, isManager: role === "owner" || role === "manager", isAdmin: role === "owner",
+    user, role, isManager, isAdmin: role === "owner", isMover, canTransfer: isManager || isMover,
     settings, setSettings: (s) => { setSettings(s); save("gp_settings", s); },
     catalog, rawCatalog, refreshCatalog, patchStock,
     sellers, setSellers,

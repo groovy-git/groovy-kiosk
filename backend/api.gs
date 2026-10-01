@@ -8,6 +8,11 @@
 const A_ = ["owner"];
 const AM_ = ["owner", "manager"];
 const ALL_ = ["owner", "manager", "salesperson"];
+// The stock mover is on none of the lists above, so every action refuses them unless it is given one
+// of the two lists below — a new action is closed to them until someone opens it on purpose.
+const MOVER_ = "stock_mover";
+const SIGNED_IN_ = ALL_.concat([MOVER_]); // logging in and seeing products + stock
+const AM_MOVER_ = AM_.concat([MOVER_]); // moving stock between branches
 
 // built lazily: Apps Script evaluates files in load order, so top-level code
 // must not reference functions from other files
@@ -21,14 +26,16 @@ function actions_() {
     forgotPassword: { fn: apiForgotPassword_, public: true },
     resetPassword: { fn: apiResetPassword_, public: true },
 
-    // everyone logged in
-    bootstrap: { fn: apiBootstrap_, roles: ALL_ },
-    me: { fn: apiMe_, roles: ALL_ },
-    logout: { fn: apiLogout_, roles: ALL_ },
-    changePassword: { fn: apiChangePassword_, roles: ALL_ },
-    getSettings: { fn: apiGetSettings_, roles: ALL_ },
-    getCatalog: { fn: apiGetCatalog_, roles: ALL_ },
-    getStock: { fn: apiGetStock_, roles: ALL_ },
+    // everyone logged in, the stock mover included
+    bootstrap: { fn: apiBootstrap_, roles: SIGNED_IN_ },
+    me: { fn: apiMe_, roles: SIGNED_IN_ },
+    logout: { fn: apiLogout_, roles: SIGNED_IN_ },
+    changePassword: { fn: apiChangePassword_, roles: SIGNED_IN_ },
+    getSettings: { fn: apiGetSettings_, roles: SIGNED_IN_ },
+    getCatalog: { fn: apiGetCatalog_, roles: SIGNED_IN_ },
+    getStock: { fn: apiGetStock_, roles: SIGNED_IN_ },
+
+    // everyone who sells
     listSellers: { fn: apiListSellers_, roles: ALL_ },
     findCustomer: { fn: apiFindCustomer_, roles: ALL_ },
     listCustomers: { fn: apiListCustomers_, roles: ALL_ },
@@ -60,8 +67,8 @@ function actions_() {
     stockIn: { fn: apiStockIn_, roles: AM_ },
     stockInBatches: { fn: apiStockInBatches_, roles: AM_ },
     adjustStock: { fn: apiAdjustStock_, roles: AM_ },
-    transferStock: { fn: apiTransferStock_, roles: AM_ },
-    listTransfers: { fn: apiListTransfers_, roles: AM_ },
+    transferStock: { fn: apiTransferStock_, roles: AM_MOVER_ },
+    listTransfers: { fn: apiListTransfers_, roles: AM_MOVER_ },
     voidSale: { fn: apiVoidSale_, roles: AM_ },
     returnItems: { fn: apiReturnItems_, roles: ALL_ }, // a salesperson is held to salesperson_max_return, not kept out by the role
     exchange: { fn: apiExchange_, roles: ALL_ }, // the cap here is on cash handed back, not on the swap
@@ -189,7 +196,7 @@ function apiBootstrap_(p, ctx) {
             branches: activeBranches_().map(branchOut_),
             settings: publicSettings_(ctx),
             catalog: apiGetCatalog_(p, ctx).data,
-            sellers: apiListSellers_(p, ctx).data,
+            sellers: ctx.user.role === MOVER_ ? [] : apiListSellers_(p, ctx).data, // who sells is not theirs to see
         },
     };
 }

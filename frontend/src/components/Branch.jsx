@@ -41,7 +41,7 @@ function BranchList({ onPick }) {
 }
 
 export function BranchSheet({ open, onClose }) {
-  const { switchBranch, branchId } = useApp();
+  const { switchBranch, branchId, isMover } = useApp();
   return (
     <Sheet open={open} onClose={onClose} title="Switch branch">
       <BranchList
@@ -50,7 +50,9 @@ export function BranchSheet({ open, onClose }) {
           if (id !== branchId) switchBranch(id);
         }}
       />
-      <p className="tiny muted center">Stock, bills and reports follow the branch you choose. A bill in progress stays with its branch.</p>
+      <p className="tiny muted center">
+        {isMover ? "Stock and transfers follow the branch you choose." : "Stock, bills and reports follow the branch you choose. A bill in progress stays with its branch."}
+      </p>
     </Sheet>
   );
 }

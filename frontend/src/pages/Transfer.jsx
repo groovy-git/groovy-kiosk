@@ -18,7 +18,7 @@ const emptyDraft = { to: 0, note: "", lines: [] };
 
 // Send stock from the branch you're working at to another branch (one step: it arrives immediately)
 export default function Transfer() {
-  const { catalog, patchStock, toast, isManager, branchId, branch, branches, isAllBranches } = useApp();
+  const { catalog, patchStock, toast, canTransfer, branchId, branch, branches, isAllBranches } = useApp();
   const KEY = draftKey(branchId);
   const [draft, setDraftState] = useState(() => {
     try {
@@ -88,7 +88,7 @@ export default function Transfer() {
     }
   };
 
-  if (!isManager) return null;
+  if (!canTransfer) return null;
   if (isAllBranches)
     return (
       <>

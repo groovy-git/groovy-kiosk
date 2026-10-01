@@ -259,11 +259,11 @@ function apiListUsers_(p, ctx) {
     };
 }
 
-// active users for the "Sold by" picker — any logged-in user
+// active users for the "Sold by" picker — any logged-in user. A stock mover never sells, so is left out.
 function apiListSellers_(p, ctx) {
     return {
         data: rows_("Users")
-            .filter((u) => u.active && (!ctx.branch_id || allowedBranchIds_(u).indexOf(ctx.branch_id) >= 0))
+            .filter((u) => u.active && roleName_(u.role) !== MOVER_ && (!ctx.branch_id || allowedBranchIds_(u).indexOf(ctx.branch_id) >= 0))
             .map((u) => ({ id: u.id, name: u.name, role: roleName_(u.role) })),
     };
 }

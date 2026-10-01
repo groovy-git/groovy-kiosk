@@ -262,6 +262,8 @@ textarea.input { min-height: 80px; resize: vertical; }
 .seg { display: flex; background: var(--cream); border-radius: 10px; padding: 3px; gap: 3px; }
 .seg button { flex: 1; border: 0; background: transparent; border-radius: 8px; min-height: 40px; font-weight: 700; color: var(--charcoal); cursor: pointer; font-size: 14px; }
 .seg button.active { background: #fff; color: var(--brown); box-shadow: var(--shadow); }
+.seg.wrap { flex-wrap: wrap; }
+.seg.wrap button { flex: 1 1 calc(50% - 3px); }
 
 .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 10px; font-size: 11.5px; font-weight: 700; background: var(--cream); color: var(--charcoal); white-space: nowrap; }
 .badge.ok { background: var(--ok-soft); color: var(--ok); }

@@ -67,6 +67,7 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
     if (role === "salesperson" && sellerId !== ctx.user.id) fail_("A salesperson can only bill under their own name");
     const seller = findBy_("Users", "id", sellerId);
     if (!seller || !seller.active) fail_("Selected salesperson is not active");
+    if (roleName_(seller.role) === MOVER_) fail_(seller.name + " is a stock mover and cannot be billed under. Choose who sold this.");
     if (allowedBranchIds_(seller).indexOf(branch) < 0) fail_(seller.name + " does not work at " + branchName_(branch));
 
     const s = settingsMap_();

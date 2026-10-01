@@ -6,9 +6,11 @@ import TopBar from "../components/TopBar";
 import { Avatar, useConfirm } from "../components/ui";
 
 export default function More() {
-  const { user, isManager, isAdmin, logout, settings } = useApp();
+  const { user, isManager, isAdmin, isMover, logout, settings } = useApp();
   const [confirm, confirmNode] = useConfirm();
-  const items = [
+  const account = { id: "account", label: "My account", sub: "Change password", icon: KeyRound };
+  // a stock mover has their own account here and nothing else
+  const items = isMover ? [account] : [
     { id: "customers", label: "Customers", sub: "Phone numbers & purchase history", icon: Users },
     !isManager && { id: "stock", label: "Products", sub: "Prices & stock", icon: Package },
     isManager && { id: "expenses", label: "Expenses", sub: "Rent, salary, tea & more", icon: Wallet },
@@ -16,7 +18,7 @@ export default function More() {
     isAdmin && { id: "users", label: "Staff", sub: "Salespeople, managers & logins", icon: UserCog },
     isAdmin && { id: "settings", label: "Settings", sub: "Shop details, GST, discounts, categories", icon: Settings },
     isAdmin && { id: "logs", label: "Activity log", sub: "Who did what", icon: History },
-    { id: "account", label: "My account", sub: "Change password", icon: KeyRound },
+    account,
   ].filter(Boolean);
 
   const standalone = window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone;

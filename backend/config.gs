@@ -13,7 +13,8 @@ const APP = {
     IMAGE_FOLDER_OLD: "GroovyPOS_Images", // its name while the app was called Groovy POS — see imageFolder_()
 };
 
-const ROLES = ["owner", "manager", "salesperson"];
+// a stock mover only carries stock between branches: sees products and stock, never sales (see api.gs)
+const ROLES = ["owner", "manager", "salesperson", "stock_mover"];
 
 const SCHEMA = {
     Users: {
