@@ -269,7 +269,7 @@ function printInNewTab(html) {
     // a browser that won't close the tab: say where the app is
     setTimeout(() => {
       const hint = !w.closed && doc.getElementById("gp-hint");
-      if (hint) hint.textContent = "Switch to the Groovy POS tab";
+      if (hint) hint.textContent = "Switch to the Groovy Kiosk tab";
     }, 400);
   });
   if (again) again.addEventListener("click", () => w.print());

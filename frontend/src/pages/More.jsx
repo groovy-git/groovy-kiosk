@@ -65,7 +65,7 @@ export default function More() {
           <LogOut size={18} /> Log out
         </button>
         <div className="tiny muted center mt">
-          {settings.business_name || "Groovy Fragrances"} POS · v1.0
+          {settings.business_name || "Groovy Fragrances"} Kiosk · v1.0
         </div>
       </div>
       {confirmNode}

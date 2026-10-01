@@ -181,7 +181,7 @@ function apiForgotPassword_(p) {
     const biz = setting_("business_name");
     MailApp.sendEmail({
         to: email,
-        subject: biz + " POS — Password reset code",
+        subject: biz + " Kiosk — Password reset code",
         body: "Hi " + u.name + ",\n\nYour password reset code is: " + otp + "\nIt expires in 10 minutes.\n\n— " + biz,
         htmlBody:
             '<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px;background:#FAF7F2">' +

@@ -759,8 +759,8 @@ const lastCat = envC.call("deleteCategory", { id: allCats[0].id }, CT);
 check("last category kept", !lastCat.success && /at least one/.test(lastCat.message) && envC.call("getCatalog", {}, CT).data.categories.length === 1, lastCat);
 
 // ---- invoice PDFs in Drive ----
-const gpFolder = env.drive.root.createFolder("Groovy POS");
-env.drive.sheetFile.parent = gpFolder; // the owner moved the Sheet into "Groovy POS"
+const gpFolder = env.drive.root.createFolder("Groovy Kiosk");
+env.drive.sheetFile.parent = gpFolder; // the owner moved the Sheet into "Groovy Kiosk"
 const pdfFiles = () => env.drive.files().filter((f) => !f.trashed && /\.pdf$/.test(f.name));
 const pathOf = (f) => { const p = []; let x = f.parent; while (x) { p.unshift(x.name); x = x.parent; } return p.join("/"); };
 check("PDF timer installed every night at 2 am (India time)", env.triggers.filter((x) => x.fn === "savePendingInvoicePdfs").length === 1 &&
@@ -770,11 +770,11 @@ const pdfSale = ok(call("completeSale", pdfSaleReq, T, 1), "sale for PDF").sale;
 const pdf1 = ok(call("saveInvoicePdf", { id: pdfSale.id }, T, 1), "save PDF manually");
 const pdfFile = pdfFiles().find((f) => f.name === pdfSale.invoice_no.replace(/\//g, "-") + ".pdf");
 const fyDir = (d) => require("vm").runInContext("fyFolderName_(" + JSON.stringify(String(d)) + ")", ctx);
-const monthDir = (d) => "My Drive/Groovy POS/Sales_Invoices/" + fyDir(d) + "/" + String(d).slice(5, 7);
+const monthDir = (d) => "My Drive/Groovy Kiosk/Sales_Invoices/" + fyDir(d) + "/" + String(d).slice(5, 7);
 check("PDF saved in Sales_Invoices/FY yyyy-yy/MM/<kind>", !!pdfFile && pathOf(pdfFile) === monthDir(pdfSale.date) + "/Non-GST", pdfFile && pathOf(pdfFile));
 check("FY folder names", fyDir("2026-09-19") === "FY 2026-27" && fyDir("2027-02-10") === "FY 2026-27" && fyDir("2026-03-31") === "FY 2025-26" && fyDir("2099-12-01") === "FY 2099-00");
 const febFolder = require("vm").runInContext('invoiceFolder_("2026-02-15", false)', ctx);
-check("Feb bill goes to FY 2025-26/02", pathOf({ parent: febFolder }) === "My Drive/Groovy POS/Sales_Invoices/FY 2025-26/02/Non-GST", pathOf({ parent: febFolder }));
+check("Feb bill goes to FY 2025-26/02", pathOf({ parent: febFolder }) === "My Drive/Groovy Kiosk/Sales_Invoices/FY 2025-26/02/Non-GST", pathOf({ parent: febFolder }));
 
 // GST bills go to the accountant's folder; bills without GST (or with no GSTIN set) go next door
 ok(call("saveSettings", { settings: { gstin: "27ABCDE1234F1Z5" } }, T), "set GSTIN");
@@ -869,7 +869,7 @@ const oldDir = pdfRootF.createFolder("2026-08");
 const oldPdf = oldDir.createFile({ name: "GF-26-27-OLD01.pdf", mime: "application/pdf", html: "old" });
 const oldUrl = oldPdf.getUrl();
 ctx.savePendingInvoicePdfs();
-check("old month folder: PDF moved to FY 2026-27/08, same id and link", pathOf(oldPdf) === "My Drive/Groovy POS/Sales_Invoices/FY 2026-27/08" && oldPdf.getUrl() === oldUrl, pathOf(oldPdf));
+check("old month folder: PDF moved to FY 2026-27/08, same id and link", pathOf(oldPdf) === "My Drive/Groovy Kiosk/Sales_Invoices/FY 2026-27/08" && oldPdf.getUrl() === oldUrl, pathOf(oldPdf));
 check("old month folder binned", oldDir.trashed === true);
 
 // Folders are found by name, never remembered by id: a Drive folder keeps its id through a rename and
@@ -915,7 +915,7 @@ check("first non-GST bill creates Non-GST", pathOf(firstNonGst) === monthDir(TOD
 // a bill in another month gets its own month folder under the same FY
 newRun();
 const janFolder = require("vm").runInContext('invoiceFolder_("2027-01-09", true)', ctx);
-check("a new month gets its own folder", pathOf({ parent: janFolder }) === "My Drive/Groovy POS/Sales_Invoices/FY 2026-27/01/GST", pathOf({ parent: janFolder }));
+check("a new month gets its own folder", pathOf({ parent: janFolder }) === "My Drive/Groovy Kiosk/Sales_Invoices/FY 2026-27/01/GST", pathOf({ parent: janFolder }));
 // running again must not duplicate anything
 const countUnder = (parent, name) => { let n = 0; const it = parent.getFoldersByName(name); while (it.hasNext()) { it.next(); n++; } return n; };
 saveBill("dir-4");
@@ -1380,8 +1380,8 @@ check("an unknown role is still rejected", !rnEnv.call("saveUser", { name: "Nope
 // (own env: the Drive tree is inspected directly, and bills are backdated into two months)
 const bkEnv = createEnv();
 const bkDrive = bkEnv.drive;
-const bkGp = bkDrive.root.createFolder("Groovy POS");
-bkDrive.sheetFile.parent = bkGp; // the sheet lives in the Groovy POS folder, as it does for real
+const bkGp = bkDrive.root.createFolder("Groovy Kiosk");
+bkDrive.sheetFile.parent = bkGp; // the sheet lives in the Groovy Kiosk folder, as it does for real
 bkEnv.ctx.setupSheets();
 const bkPwd = /Password: (\S+)/.exec(bkEnv.alerts.pop())[1];
 const BKT = bkEnv.call("login", { email: "owner@groovy.test", password: bkPwd }).data.token;
@@ -1426,7 +1426,7 @@ require("vm").runInContext('todayStr_ = function () { return "2026-09-01"; };', 
 const bkMonthly = bkEnv.ctx.monthlyBackup();
 check("monthly backup: folder is named for the month it covers", !!bkFolder(bkRoot(), "2026-08"), bkRoot() ? "no 2026-08" : "no Back_up");
 const bkAug = bkFolder(bkRoot(), "2026-08");
-check("monthly backup: the sheet is copied", !!bkNamed(bkAug, "Groovy POS Data 2026-08"), bkAug.getFiles().hasNext());
+check("monthly backup: the sheet is copied", !!bkNamed(bkAug, "Groovy Kiosk Data 2026-08"), bkAug.getFiles().hasNext());
 check("monthly backup: August's invoices, and only those", bkPdfs(bkAug).length === 2, bkPdfs(bkAug).map((f) => f.getName()));
 check("monthly backup: filed the way they are stored", /Back_up\/2026-08\/Sales_Invoices\/FY 2026-27\/08\//.test(bkPath(bkPdfs(bkAug)[0])), bkPath(bkPdfs(bkAug)[0]));
 check("monthly backup: says it finished", !!bkNamed(bkAug, "BACKUP COMPLETE.txt") && !bkNamed(bkAug, "BACKUP IN PROGRESS.txt"));
@@ -1445,7 +1445,7 @@ bkEnv.ctx.backupNow();
 const bkManual = bkFolder(bkRoot(), "2026-09-25 09-15");
 check("manual backup: a folder stamped with the time", !!bkManual);
 check("manual backup: every invoice, both months", bkPdfs(bkManual).length === 3, bkPdfs(bkManual).map((f) => f.getName()));
-check("manual backup: the sheet too", !!bkNamed(bkManual, "Groovy POS Data 2026-09-25 09-15"));
+check("manual backup: the sheet too", !!bkNamed(bkManual, "Groovy Kiosk Data 2026-09-25 09-15"));
 check("manual backup: says it finished", !!bkNamed(bkManual, "BACKUP COMPLETE.txt"));
 require("vm").runInContext('backupStamp_ = function () { return "2026-09-25 18-40"; };', bkEnv.ctx);
 bkEnv.ctx.backupNow();
@@ -1491,10 +1491,10 @@ check("a successful backup is logged too", bkEnv.ctx.rows_("Activity_Logs").some
 // ---- backups: product photos, and running the monthly one by hand ----
 const b2Env = createEnv();
 const b2Drive = b2Env.drive;
-const b2Gp = b2Drive.root.createFolder("Groovy POS");
+const b2Gp = b2Drive.root.createFolder("Groovy Kiosk");
 b2Drive.sheetFile.parent = b2Gp;
 // the photo folder sits at the top of Drive, not beside the sheet — that is where uploads go
-const b2Images = b2Drive.root.createFolder("GroovyPOS_Images");
+const b2Images = b2Drive.root.createFolder("GroovyKiosk_Images");
 b2Images.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" });
 b2Images.createFile({ name: "attar-2.jpg", mime: "image/jpeg", html: "photo two" });
 b2Env.ctx.setupSheets();
@@ -1528,18 +1528,19 @@ require("vm").runInContext('backupStamp_ = function () { return "2026-09-25 10-0
 require("vm").runInContext(b2Yes, b2Env.ctx);
 b2Env.ctx.backupNow();
 const b2Full = b2Folder(b2Root(), "2026-09-25 10-00");
-const b2FullImgs = b2Folder(b2Full, "GroovyPOS_Images");
+const b2FullImgs = b2Folder(b2Full, "GroovyKiosk_Images");
 check("full backup: the product photos come too", !!b2FullImgs && b2Count(b2FullImgs) === 2, b2FullImgs ? b2Count(b2FullImgs) : "no folder");
 check("full backup: the photos are counted in the note", /Photo files: 2/.test(b2Named(b2Full, "BACKUP COMPLETE.txt").getBlob().getDataAsString()),
     b2Named(b2Full, "BACKUP COMPLETE.txt").getBlob().getDataAsString());
 check("full backup: the invoices are still there", !!b2Folder(b2Full, "Sales_Invoices"));
 
 // a month-only backup leaves the photos alone
+require("vm").runInContext('todayStr_ = function () { return "2026-09-25"; };', b2Env.ctx); // "this month" is the bills' month
 require("vm").runInContext('backupStamp_ = function () { return "2026-09-25 11-00"; };', b2Env.ctx);
 require("vm").runInContext(b2No, b2Env.ctx);
 b2Env.ctx.backupNow();
 const b2Month = b2Folder(b2Root(), "2026-09-25 11-00");
-check("a month's backup does not copy the photos", !b2Folder(b2Month, "GroovyPOS_Images"));
+check("a month's backup does not copy the photos", !b2Folder(b2Month, "GroovyKiosk_Images"));
 check("a month's backup still copies that month's invoices", !!b2Folder(b2Month, "Sales_Invoices"));
 
 // a full backup that runs out of time during the photos must not say COMPLETE
@@ -1553,7 +1554,7 @@ check("cut short during the photos: not marked finished", !!b2Busy && !b2Named(b
 check("cut short during the photos: the note remembers to do them", /Images: yes/.test(b2Busy.getBlob().getDataAsString()), b2Busy.getBlob().getDataAsString());
 require("vm").runInContext('backupBudget_ = function () { return function () { return true; }; };', b2Env.ctx);
 b2Env.ctx.resumeBackup();
-check("resumed: the photos are finished off", b2Count(b2Folder(b2Cut, "GroovyPOS_Images")) === 2, b2Count(b2Folder(b2Cut, "GroovyPOS_Images") || b2Cut));
+check("resumed: the photos are finished off", b2Count(b2Folder(b2Cut, "GroovyKiosk_Images")) === 2, b2Count(b2Folder(b2Cut, "GroovyKiosk_Images") || b2Cut));
 check("resumed: only then is it COMPLETE", !!b2Named(b2Cut, "BACKUP COMPLETE.txt") && !b2Named(b2Cut, "BACKUP IN PROGRESS.txt"));
 
 // "Back up last month" from the menu does what the 1st-of-the-month job does
@@ -1562,8 +1563,8 @@ require("vm").runInContext(b2Yes, b2Env.ctx);
 b2Env.ctx.backupLastMonth();
 const b2Aug = b2Folder(b2Root(), "2026-08");
 check("back up last month: the folder is named for August", !!b2Aug);
-check("back up last month: August's invoice, and the sheet", !!b2Folder(b2Aug, "Sales_Invoices") && !!b2Named(b2Aug, "Groovy POS Data 2026-08"));
-check("back up last month: no photos in the monthly one", !b2Folder(b2Aug, "GroovyPOS_Images"));
+check("back up last month: August's invoice, and the sheet", !!b2Folder(b2Aug, "Sales_Invoices") && !!b2Named(b2Aug, "Groovy Kiosk Data 2026-08"));
+check("back up last month: no photos in the monthly one", !b2Folder(b2Aug, "GroovyKiosk_Images"));
 check("back up last month: says it finished", !!b2Named(b2Aug, "BACKUP COMPLETE.txt"));
 const b2AugFiles = b2Count(b2Aug);
 b2Env.ctx.backupLastMonth();
@@ -1574,22 +1575,54 @@ check("back up last month: saying no changes nothing", /Nothing was changed/.tes
 
 // a shop with no photos at all is fine
 const b2NoImg = createEnv();
-b2NoImg.drive.sheetFile.parent = b2NoImg.drive.root.createFolder("Groovy POS");
+b2NoImg.drive.sheetFile.parent = b2NoImg.drive.root.createFolder("Groovy Kiosk");
 b2NoImg.ctx.setupSheets();
 b2NoImg.alerts.pop();
 require("vm").runInContext('backupStamp_ = function () { return "2026-09-25 13-00"; };', b2NoImg.ctx);
 require("vm").runInContext(b2Yes, b2NoImg.ctx);
 b2NoImg.ctx.backupNow();
-const b2Empty = (() => { const it = b2NoImg.drive.root.getFolders(); while (it.hasNext()) { const f = it.next(); if (f.getName() === "Groovy POS") { const b = f.getFoldersByName("Back_up"); if (b.hasNext()) return b.next().getFoldersByName("2026-09-25 13-00").next(); } } return null; })();
+const b2Empty = (() => { const it = b2NoImg.drive.root.getFolders(); while (it.hasNext()) { const f = it.next(); if (f.getName() === "Groovy Kiosk") { const b = f.getFoldersByName("Back_up"); if (b.hasNext()) return b.next().getFoldersByName("2026-09-25 13-00").next(); } } return null; })();
 check("a shop with no photos backs up without complaint", !!b2Empty && !!b2Named(b2Empty, "BACKUP COMPLETE.txt"));
+
+// ---- the app used to be Groovy POS: its photo folder is renamed where it sits, never made twice ----
+const nmEnv = createEnv();
+const nmDrive = nmEnv.drive;
+const nmHome = nmDrive.root.createFolder("Groovy Kiosk");
+nmDrive.sheetFile.parent = nmHome;
+const nmOld = nmDrive.root.createFolder("GroovyPOS_Images");
+nmOld.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" });
+// a full backup made before the rename holds a copy under the old name — that one is history
+const nmCopy = nmHome.createFolder("Back_up").createFolder("2026-09-25 10-00").createFolder("GroovyPOS_Images");
+nmCopy.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" });
+const nmId = nmOld.getId();
+nmEnv.ctx.setupSheets();
+const nmPwd = /Password: (\S+)/.exec(nmEnv.alerts.pop())[1];
+check("renamed app: Setup renames the old photo folder, same id, same photos",
+    nmOld.getName() === "GroovyKiosk_Images" && nmOld.getId() === nmId && nmOld.parent === nmDrive.root && b2Count(nmOld) === 1, nmOld.getName());
+check("renamed app: the copy inside a backup keeps its old name", nmCopy.getName() === "GroovyPOS_Images" && b2Count(nmCopy) === 1, nmCopy.getName());
+const NMT = nmEnv.call("login", { email: "owner@groovy.test", password: nmPwd }).data.token;
+ok(nmEnv.call("uploadImage", { data: "cGhvdG8=", mime: "image/jpeg", name: "attar-2.jpg" }, NMT), "upload a photo after the rename");
+check("renamed app: a new photo lands in that same folder", b2Count(nmOld) === 2, b2Count(nmOld));
+const nmFolders = (name) => { let n = 0; const it = nmDrive.api.getFoldersByName(name); while (it.hasNext()) { it.next(); n++; } return n; };
+check("renamed app: no second photo folder is made", nmFolders("GroovyKiosk_Images") === 1 && nmFolders("GroovyPOS_Images") === 1,
+    { now: nmFolders("GroovyKiosk_Images"), old: nmFolders("GroovyPOS_Images") });
+// with no Setup run yet, the first upload does the same
+const nm2Env = createEnv();
+nm2Env.ctx.setupSheets();
+const nm2Pwd = /Password: (\S+)/.exec(nm2Env.alerts.pop())[1];
+const nm2Old = nm2Env.drive.root.createFolder("GroovyPOS_Images");
+nm2Old.createFile({ name: "attar-1.jpg", mime: "image/jpeg", html: "photo one" });
+const NM2T = nm2Env.call("login", { email: "owner@groovy.test", password: nm2Pwd }).data.token;
+ok(nm2Env.call("uploadImage", { data: "cGhvdG8=", mime: "image/jpeg", name: "attar-2.jpg" }, NM2T), "upload before Setup has run");
+check("renamed app: an upload renames the old folder too", nm2Old.getName() === "GroovyKiosk_Images" && b2Count(nm2Old) === 2, { name: nm2Old.getName(), files: b2Count(nm2Old) });
 
 const countLiveImages = (folder) => { let n = 0; const it = folder.getFiles(); while (it.hasNext()) { if (!it.next().trashed) n++; } return n; };
 // ---- a reset clears the Drive files of what it deleted, and never touches Back_up ----
 const rdEnv = createEnv();
 const rdDrive = rdEnv.drive;
-const rdGp = rdDrive.root.createFolder("Groovy POS");
+const rdGp = rdDrive.root.createFolder("Groovy Kiosk");
 rdDrive.sheetFile.parent = rdGp;
-const rdImages = rdDrive.root.createFolder("GroovyPOS_Images");
+const rdImages = rdDrive.root.createFolder("GroovyKiosk_Images");
 ["a.jpg", "b.jpg"].forEach((n) => rdImages.createFile({ name: n, mime: "image/jpeg", html: "x" }));
 rdEnv.ctx.setupSheets();
 const rdPwd = /Password: (\S+)/.exec(rdEnv.alerts.pop())[1];
@@ -1630,7 +1663,7 @@ require("vm").runInContext('backupStamp_ = function () { return "2026-09-25 08-0
 rdEnv.ctx.backupNow();
 const rdBackup = rdFolder(rdFolder(rdGp, "Back_up"), "2026-09-25 08-00");
 const rdBackedUpPdfs = rdPdfsUnder(rdBackup).length;
-const rdBackedUpPhotos = (() => { const f = rdFolder(rdBackup, "GroovyPOS_Images"); let n = 0; const it = f.getFiles(); while (it.hasNext()) { if (rdLive(it.next())) n++; } return n; })();
+const rdBackedUpPhotos = (() => { const f = rdFolder(rdBackup, "GroovyKiosk_Images"); let n = 0; const it = f.getFiles(); while (it.hasNext()) { if (rdLive(it.next())) n++; } return n; })();
 check("before the reset: the backup holds the invoices and photos", rdBackedUpPdfs === 2 && rdBackedUpPhotos === 2, { rdBackedUpPdfs, rdBackedUpPhotos });
 check("the warning names the backup it found", /Last finished backup: 2026-09-25 08-00/.test(rdEnv.ctx.backupStatusLine_()), rdEnv.ctx.backupStatusLine_());
 
@@ -1664,12 +1697,12 @@ check("reset everything: the invoice PDFs are gone", rdPdfsUnder(rdFolder(rdGp, 
 check("reset everything: products are gone", rdEnv.ctx.rows_("Products").length === 0);
 check("reset everything: the backup still has everything", rdPdfsUnder(rdBackup).length === 2 && !rdBackup.trashed, rdPdfsUnder(rdBackup).length);
 check("reset everything: the backup's photos are still there too",
-    (() => { const f = rdFolder(rdBackup, "GroovyPOS_Images"); let n = 0; const it = f.getFiles(); while (it.hasNext()) { if (rdLive(it.next())) n++; } return n; })() === 2);
+    (() => { const f = rdFolder(rdBackup, "GroovyKiosk_Images"); let n = 0; const it = f.getFiles(); while (it.hasNext()) { if (rdLive(it.next())) n++; } return n; })() === 2);
 check("reset everything: the Back_up folder is never binned", !rdFolder(rdGp, "Back_up").trashed);
 
 // with no backup at all, the warning says so plainly
 const rdNoBk = createEnv();
-rdNoBk.drive.sheetFile.parent = rdNoBk.drive.root.createFolder("Groovy POS");
+rdNoBk.drive.sheetFile.parent = rdNoBk.drive.root.createFolder("Groovy Kiosk");
 rdNoBk.ctx.setupSheets();
 rdNoBk.alerts.pop();
 check("with no backup, the warning says so", /no finished backup yet/.test(rdNoBk.ctx.backupStatusLine_()), rdNoBk.ctx.backupStatusLine_());

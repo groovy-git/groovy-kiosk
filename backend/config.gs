@@ -1,15 +1,16 @@
 /**
- * Groovy Fragrances POS — schema & constants.
+ * Groovy Fragrances Kiosk — schema & constants.
  * Every sheet is a table: row 1 = headers, one record per row.
  * Column types: n = number, s = text (stored as plain text so barcodes/phones keep leading zeros),
  *               d = IST datetime text "yyyy-MM-dd HH:mm:ss", j = JSON text.
  */
 
 const APP = {
-    NAME: "Groovy Fragrances POS",
+    NAME: "Groovy Fragrances Kiosk",
     TZ: "Asia/Kolkata",
     SESSION_DAYS: 30,
-    IMAGE_FOLDER: "GroovyPOS_Images",
+    IMAGE_FOLDER: "GroovyKiosk_Images",
+    IMAGE_FOLDER_OLD: "GroovyPOS_Images", // its name while the app was called Groovy POS — see imageFolder_()
 };
 
 const ROLES = ["owner", "manager", "salesperson"];

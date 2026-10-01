@@ -5,7 +5,7 @@
  *   Back_up/2026-08/              ← made on 1 September, holds August
  *   Back_up/2026-09-25 09-15/     ← made by hand, holds whatever was asked for
  *
- * Two ways in: "Back up now…" in the Groovy POS menu, and a trigger on the 1st of each month at 6am
+ * Two ways in: "Back up now…" in the Groovy Kiosk menu, and a trigger on the 1st of each month at 6am
  * that saves the month just ended. The monthly folder is named for the month it covers, so running it
  * again lands in the same folder and copies nothing twice.
  *
@@ -114,9 +114,8 @@ function copyInvoiceMonth_(ym, dest, inTime) {
  * Returns how many were copied and whether it got to the end before the time ran out.
  */
 function copyImages_(dest, inTime) {
-    const it = DriveApp.getFoldersByName(APP.IMAGE_FOLDER);
-    if (!it.hasNext()) return { copied: 0, done: true }; // no photos uploaded from the app
-    const from = it.next();
+    const from = imageFolder_(false);
+    if (!from) return { copied: 0, done: true }; // no photos uploaded from the app
     const to = subFolder_(dest, APP.IMAGE_FOLDER);
     let copied = 0;
     const files = from.getFiles();
@@ -373,10 +372,10 @@ function backupFailed_(what, e) {
             {
                 subject: biz + " — backup did not finish",
                 text: what + " could not finish:\n\n" + msg + "\n\nNothing was lost; your data and invoices are untouched. " +
-                    "The next attempt runs on the 1st, or use Groovy POS → Back up now in the sheet.",
+                    "The next attempt runs on the 1st, or use Groovy Kiosk → Back up now in the sheet.",
                 html: '<div style="font-family:Arial,Helvetica,sans-serif"><p><b>' + escHtml_(what) + "</b> could not finish:</p>" +
                     '<p style="color:#C62828">' + escHtml_(msg) + "</p><p>Nothing was lost; your data and invoices are untouched. " +
-                    "The next attempt runs on the 1st, or use <b>Groovy POS → Back up now</b> in the sheet.</p></div>",
+                    "The next attempt runs on the 1st, or use <b>Groovy Kiosk → Back up now</b> in the sheet.</p></div>",
             },
             {},
         );
@@ -427,9 +426,9 @@ function trashInvoiceFiles_() {
 
 /** Move the product photos to Drive's bin, keeping the folder so the next upload still works. */
 function trashProductImages_(inTime) {
-    const it = DriveApp.getFoldersByName(APP.IMAGE_FOLDER);
-    if (!it.hasNext()) return 0;
-    const files = it.next().getFiles();
+    const folder = imageFolder_(false);
+    if (!folder) return 0;
+    const files = folder.getFiles();
     let gone = 0;
     while (files.hasNext()) {
         if (inTime && !inTime()) break; // a big library finishes on the next run
@@ -441,9 +440,9 @@ function trashProductImages_(inTime) {
 
 /** How many photos there are, for the warning before a reset. */
 function countProductImages_() {
-    const it = DriveApp.getFoldersByName(APP.IMAGE_FOLDER);
-    if (!it.hasNext()) return 0;
-    const files = it.next().getFiles();
+    const folder = imageFolder_(false);
+    if (!folder) return 0;
+    const files = folder.getFiles();
     let n = 0;
     while (files.hasNext()) {
         files.next();

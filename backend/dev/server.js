@@ -69,5 +69,5 @@ http
         });
     })
     .listen(PORT, () =>
-        console.log(`Groovy POS mock API on http://localhost:${PORT}\nLogin: admin@demo.local / admin123\nEmails are not sent locally — preview the latest at http://localhost:${PORT}/mail`),
+        console.log(`Groovy Kiosk mock API on http://localhost:${PORT}\nLogin: admin@demo.local / admin123\nEmails are not sent locally — preview the latest at http://localhost:${PORT}/mail`),
     );

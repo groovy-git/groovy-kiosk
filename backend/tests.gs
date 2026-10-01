@@ -1,4 +1,4 @@
-/** Self-tests for the pure pricing logic. Run "Run self-tests" from the Groovy POS menu. */
+/** Self-tests for the pure pricing logic. Run "Run self-tests" from the Groovy Kiosk menu. */
 
 function runTests() {
     const results = [];

@@ -170,7 +170,7 @@ function sendMail_(to, mail, extra) {
         subject: mail.subject,
         body: mail.text,
         htmlBody: mail.html,
-        name: (setting_("business_name") || "Groovy Fragrances") + " POS",
+        name: (setting_("business_name") || "Groovy Fragrances") + " Kiosk",
     };
     if (extra && extra.cc) msg.cc = extra.cc;
     if (extra && extra.replyTo) msg.replyTo = extra.replyTo;
@@ -194,7 +194,7 @@ function apiEmailDayClose_(p, ctx) {
     const d = reportDayClose_({ date }, ctx);
     const mail = dayCloseMail_(d, settingsMap_(), {
         salesperson: isSalesman ? ctx.user.name : "",
-        footer: "Sent by " + ctx.user.name + " from Groovy POS on " + nowStr_().slice(0, 16),
+        footer: "Sent by " + ctx.user.name + " from Groovy Kiosk on " + nowStr_().slice(0, 16),
     });
     const cc = p.copy_me && ctx.user.email && to.indexOf(ctx.user.email) < 0 ? ctx.user.email : "";
     sendMail_(to, mail, { cc, replyTo: ctx.user.email });
@@ -210,7 +210,7 @@ function sendNightlyReport() {
     resetReqCache_();
     const s = settingsMap_();
     if (s.nightly_report !== "yes") return "disabled";
-    const results = sendBranchDayCloses_(s.nightly_report_skip_empty !== "no", "Sent automatically every night by Groovy POS. Turn it off in Settings → Email.");
+    const results = sendBranchDayCloses_(s.nightly_report_skip_empty !== "no", "Sent automatically every night by Groovy Kiosk. Turn it off in Settings → Email.");
     return results.join("; ");
 }
 
@@ -244,5 +244,5 @@ function syncNightlyTrigger_() {
 // Sheet menu: send today's whole-shop day close right now (ignores the on/off switch)
 function emailDayCloseNow() {
     resetReqCache_();
-    alert_("Day close emails:\n" + sendBranchDayCloses_(false, "Sent from the Groovy POS menu in Google Sheets.").join("\n"));
+    alert_("Day close emails:\n" + sendBranchDayCloses_(false, "Sent from the Groovy Kiosk menu in Google Sheets.").join("\n"));
 }

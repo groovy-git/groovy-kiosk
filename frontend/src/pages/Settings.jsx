@@ -175,7 +175,7 @@ function EmailSettings({ f, setF, saved }) {
             placeholder="owner@gmail.com, accountant@gmail.com"
           />
         </Field>
-        <div className="tiny muted">Emails are sent from the Google account that owns the POS Google Sheet.</div>
+        <div className="tiny muted">Emails are sent from the Google account that owns the Groovy Kiosk Google Sheet.</div>
       </div>
 
       <div className="card mt">

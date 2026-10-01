@@ -1,6 +1,6 @@
-# Groovy Fragrances POS
+# Groovy Fragrances Kiosk
 
-A mobile-first point-of-sale system for Groovy Fragrances. It handles billing with barcode scanning, loose attar sold by ml or tola, GST invoices, split payments, stock, expenses, and reports that show each salesperson's sales.
+A mobile-first billing and stock app for the Groovy Fragrances kiosks. It handles billing with barcode scanning, loose attar sold by ml or tola, GST invoices, split payments, stock, expenses, and reports that show each salesperson's sales.
 
 **How it fits together**
 
@@ -29,7 +29,7 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
 
 ## 1. Create the database and backend (Google)
 
-1. Open [sheets.new](https://sheets.new) and name the sheet **Groovy POS Data**.
+1. Open [sheets.new](https://sheets.new) and name the sheet **Groovy Kiosk Data**.
 2. Go to **Extensions → Apps Script**. This opens a script project linked to the sheet.
 3. Add the backend code. There are two ways:
     - **Copy and paste (simplest).** For each `.gs` file in `backend/`:
@@ -47,33 +47,33 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
             ```
         3. In the `backend/` folder, copy `.clasp.json.example` to `.clasp.json` (`copy` on Windows, `cp` on Mac/Linux). Replace `PASTE_YOUR_SCRIPT_ID_HERE` with the **Script ID** from Apps Script → ⚙ **Project Settings → IDs**. This file stays on your computer and is never uploaded to GitHub.
         4. From `backend/`, run `clasp push`. If it asks _"Manifest file has been updated. Do you want to push and overwrite?"_, answer **y**.
-4. Go back to the sheet and reload the page. A **Groovy POS** menu appears.
-5. Click **Groovy POS → 1. Setup / repair sheets**.
+4. Go back to the sheet and reload the page. A **Groovy Kiosk** menu appears.
+5. Click **Groovy Kiosk → 1. Setup / repair sheets**.
     - Google will ask for permission. Choose **Advanced → Go to project → Allow**.
     - Setup creates all the tabs.
     - It also shows an **Owner email and password**. The email is the Google account you're signed in with. Write these down.
     - After your first login, change the password straight away in **More → My account → Change password**.
-6. Optional: click **Groovy POS → Run self-tests**. You should see "All 35 tests passed".
+6. Optional: click **Groovy Kiosk → Run self-tests**. You should see "All 35 tests passed".
 7. Deploy the backend as a web app:
     - In Apps Script, click **Deploy → New deployment**.
     - Type: **Web app**.
     - Execute as: **Me**.
     - Who has access: **Anyone**.
-    - Click **Deploy** and copy the **Web app URL** (it ends in `/exec`). You can see it again any time with **Groovy POS → Show web app URL**.
+    - Click **Deploy** and copy the **Web app URL** (it ends in `/exec`). You can see it again any time with **Groovy Kiosk → Show web app URL**.
 
 > "Anyone" only means the URL can be reached. Nothing can be read or changed without a staff login.
 
 ## 2. Publish the phone app (GitHub Pages, free)
 
-1. Create a **public** repository on GitHub, for example `groovy-pos`, and push **the contents of the `groovy-pos` folder** to it, so that `.github/`, `backend/` and `frontend/` sit at the top of the repository. If you push the parent folder instead, the deploy workflow won’t run.
+1. Create a **public** repository on GitHub, for example `groovy-kiosk`, and push **the contents of the `groovy-kiosk` folder** to it, so that `.github/`, `backend/` and `frontend/` sit at the top of the repository. If you push the parent folder instead, the deploy workflow won’t run.
 
-    If you haven't used git before, run these from inside the `groovy-pos` folder:
+    If you haven't used git before, run these from inside the `groovy-kiosk` folder:
 
     ```bash
     git init -b main
     git add .
-    git commit -m "Groovy POS"
-    git remote add origin https://github.com/<your-github-username>/groovy-pos.git
+    git commit -m "Groovy Kiosk"
+    git remote add origin https://github.com/<your-github-username>/groovy-kiosk.git
     git push -u origin main
     ```
 
@@ -86,7 +86,7 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
     - Value: the web app URL from step 1.7
 4. Go to **Actions → Deploy app to GitHub Pages → Run workflow**. It takes about 1 minute.
     - The first run, started automatically by your push in step 1, fails because the variable wasn't set yet. That's expected; the run you start here is the one that counts.
-5. Your app is live at `https://<your-github-username>.github.io/groovy-pos/`.
+5. Your app is live at `https://<your-github-username>.github.io/groovy-kiosk/`.
 
 ## 3. Install on each phone
 
@@ -196,14 +196,14 @@ If you have only one branch, none of this shows. The app works exactly like a si
     - Turn it **Off** there at any time.
 - **Recipients:** the addresses in **Send day-close emails to** (the owner list, which receives every branch). If that box is empty, the emails go to every Owner account. With several branches, each branch sends its own email to that branch's list plus the owner list.
 - **Sender:** emails come from the Google account that owns the Sheet. A personal Gmail account can send about 100 emails a day, which is plenty.
-- The Sheet menu also has **Groovy POS → Email today's day close now**.
+- The Sheet menu also has **Groovy Kiosk → Email today's day close now**.
 
 ## Invoice PDFs in Google Drive
 
 Every bill is also kept as an A4 PDF in your Google Drive:
 
 ```
-<folder that holds the Sheet, e.g. Groovy POS>/
+<folder that holds the Sheet, e.g. Groovy Kiosk>/
   Sales_Invoices/
     FY 2026-27/                 ← April to March, like your bill numbers
       09/                       ← month
@@ -222,7 +222,7 @@ Every bill is also kept as an A4 PDF in your Google Drive:
 - **On/off:** **More → Settings → Billing → Save invoice PDFs to Google Drive automatically**. Saving by hand always works.
 - The PDFs are made by the Google script from the saved bill, not by the phone, so the app stays light.
 - **Keep the folder private.** The files belong to the shop account; share them with customers through WhatsApp or Share in the app instead.
-- **After this update:** run **Groovy POS → 1. Setup / repair sheets** once. It adds the `pdf_url` columns and starts the 15-minute timer. If Google asks for permission, click **Allow**.
+- **After this update:** run **Groovy Kiosk → 1. Setup / repair sheets** once. It adds the `pdf_url` columns and starts the 15-minute timer. If Google asks for permission, click **Allow**.
 
 ## 5. Updating later
 
@@ -230,13 +230,13 @@ Every bill is also kept as an A4 PDF in your Google Drive:
     1. Paste in the new code, or from `backend/` run `clasp push` (answer **y** if asked to overwrite the manifest).
     2. Make the live app use it: go to **Deploy → Manage deployments → ✏️ Edit**, set **Version: New version**, and click **Deploy**.
        With clasp instead: run `clasp deployments`, copy the ID of the web-app deployment (the one that is **not** `@HEAD`), then run `clasp redeploy <that ID> -d "v3 – what changed"`.
-    3. Open the Sheet and run **Groovy POS → 1. Setup / repair sheets**. It adds any new tabs or columns the update needs; until you do, the app shows "The app was updated — run Setup".
+    3. Open the Sheet and run **Groovy Kiosk → 1. Setup / repair sheets**. It adds any new tabs or columns the update needs; until you do, the app shows "The app was updated — run Setup".
     4. If Google asks for new permissions (for example after the nightly-email update), open the Apps Script editor, run any function (e.g. `emailDayCloseNow`) once and click **Allow**.
 
     Always use **Edit** so the URL stays the same. A new deployment gets a new URL, and the app would stop reaching the backend.
 
 - **App** (`frontend/`): push to `main`. GitHub rebuilds it, and phones pick up the update the next time the app is opened. The rebuild runs by itself only when something in `frontend/` changes.
-- **Pushing everyone onto the new version:** **Groovy POS → Log everyone out (after an update)**. Everyone signs in again on their next tap, which in practice means a fresh load of the app. Nothing else is touched — no bills, stock, products or settings. The app does update itself on the next open either way, and the backend is live for everyone the moment you deploy it, so this is a nudge rather than a requirement.
+- **Pushing everyone onto the new version:** **Groovy Kiosk → Log everyone out (after an update)**. Everyone signs in again on their next tap, which in practice means a fresh load of the app. Nothing else is touched — no bills, stock, products or settings. The app does update itself on the next open either way, and the backend is live for everyone the moment you deploy it, so this is a nudge rather than a requirement.
 - **If the web app URL ever changes** (for example you made a _new_ deployment instead of editing): update the `VITE_API_URL` variable, then go to **Actions → Deploy app to GitHub Pages → Run workflow**.
 
 ## Good practice
@@ -247,13 +247,13 @@ Every bill is also kept as an A4 PDF in your Google Drive:
 - **Backups:** Google Sheets keeps version history automatically. You can also use **File → Make a copy** once a month.
 - **Staff leaving:** deactivate them in Staff. Their past sales stay in the reports.
 - **Removing a product:** hide it with the eye icon on Edit product. Its bills and reports stay intact. The owner can **Delete** a product only if it was never sold, stocked in, adjusted or transferred, for example a duplicate added by mistake.
-- **Load demo data only into a test copy of the sheet:** **Groovy POS → 2. Load demo data**. It refuses to run if products already exist.
-- **Going live after testing:** first back up with **File → Make a copy**, then run **Groovy POS → 3. Reset test data (keep setup)…** and type `RESET`.
+- **Load demo data only into a test copy of the sheet:** **Groovy Kiosk → 2. Load demo data**. It refuses to run if products already exist.
+- **Going live after testing:** first back up with **File → Make a copy**, then run **Groovy Kiosk → 3. Reset test data (keep setup)…** and type `RESET`.
     - It clears bills, payments, returns, held bills, expenses, customers, stock history, stock-ins and transfers. It sets all stock to 0 and restarts bill numbers at 00001.
     - It keeps products and prices, categories, brands, staff, branches and shop settings.
     - Everyone is logged out. Log in again on each phone, then enter your real stock with **Stock In**.
     - This can’t be undone, which is why you make the copy first.
-- **Starting over completely:** **Groovy POS → 4. Reset EVERYTHING incl. products…** and type `ERASE ALL`. It does everything above **and** deletes every product, size, brand and category — prices, SKUs and barcodes included. Staff, branches and shop settings are kept, and the standard categories come back empty so you can add products straight away. Back up first; there is no undo.
+- **Starting over completely:** **Groovy Kiosk → 4. Reset EVERYTHING incl. products…** and type `ERASE ALL`. It does everything above **and** deletes every product, size, brand and category — prices, SKUs and barcodes included. Staff, branches and shop settings are kept, and the standard categories come back empty so you can add products straight away. Back up first; there is no undo.
 - **Do a pilot day before going live.** Use a copy with demo data and try everything once:
     - the camera and the Bluetooth scanner;
     - the printer;
@@ -271,9 +271,9 @@ Every bill is also kept as an A4 PDF in your Google Drive:
 | "Couldn't reach the server"                               | Check the phone's internet. Check that `VITE_API_URL` is the `/exec` URL and that the deployment's access is **Anyone**. |
 | App shows old screens                                     | Close the app fully and reopen it. The update installs automatically.                                                    |
 | Camera doesn't open                                       | Allow camera access for the site or app in phone settings. On iPhone, use Safari to install the app.                     |
-| "Sheet … missing"                                         | Run **Groovy POS → 1. Setup / repair sheets** again. It is safe to repeat.                                               |
+| "Sheet … missing"                                         | Run **Groovy Kiosk → 1. Setup / repair sheets** again. It is safe to repeat.                                               |
 | Forgot the owner password                                     | Use **Forgot password?** on the login screen. A 6-digit code is emailed to you.                                          |
-| "The app was updated — run Setup…"                        | Open the Sheet and run **Groovy POS → 1. Setup / repair sheets**.                                                        |
+| "The app was updated — run Setup…"                        | Open the Sheet and run **Groovy Kiosk → 1. Setup / repair sheets**.                                                        |
 | "You are not assigned to any active branch"               | Owner: go to **Staff** and set the person's **Works at**, or turn the branch back on in **Settings → Branches**.         |
 | "Server busy, please try again"                           | Two phones saved at the same moment. Tap again.                                                                          |
 | The first action after a quiet period takes a few seconds | Normal. Google is starting the script up.                                                                                |

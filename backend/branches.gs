@@ -62,7 +62,7 @@ function homeBranch_(user) {
  */
 function resolveBranch_(user, requested) {
     const active = activeBranches_();
-    if (!active.length) fail_("No active branch. Run Setup from the Groovy POS menu.", "BRANCH");
+    if (!active.length) fail_("No active branch. Run Setup from the Groovy Kiosk menu.", "BRANCH");
     if (active.length === 1) {
         if (user.role !== "owner" && allowedBranchIds_(user).indexOf(active[0].id) < 0) fail_("You are not assigned to any active branch", "BRANCH");
         return active[0].id;

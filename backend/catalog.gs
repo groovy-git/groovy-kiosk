@@ -439,13 +439,26 @@ function apiGenerateBarcode_(p, ctx) {
 
 /* ---------- images (Drive) ---------- */
 
+/**
+ * The product-photo folder at the top of Drive. One made while the app was called Groovy POS is
+ * renamed in place: a Drive folder keeps its id through a rename and a product stores only its
+ * photo's file id, so every photo keeps showing. The old name is looked for at the top of Drive
+ * only — the copies inside Back_up carry that name too, and those stay as they are.
+ */
+function imageFolder_(create) {
+    const it = DriveApp.getFoldersByName(APP.IMAGE_FOLDER);
+    if (it.hasNext()) return it.next();
+    const old = DriveApp.getRootFolder().getFoldersByName(APP.IMAGE_FOLDER_OLD);
+    if (old.hasNext()) return old.next().setName(APP.IMAGE_FOLDER);
+    return create ? DriveApp.createFolder(APP.IMAGE_FOLDER) : null;
+}
+
 function apiUploadImage_(p, ctx) {
     const data = String(p.data || "");
     if (!data) fail_("No image");
     if (data.length > 3 * 1024 * 1024) fail_("Image too large (max ~2 MB)");
     const mime = /^image\/(jpeg|png|webp)$/.test(p.mime) ? p.mime : "image/jpeg";
-    const it = DriveApp.getFoldersByName(APP.IMAGE_FOLDER);
-    const folder = it.hasNext() ? it.next() : DriveApp.createFolder(APP.IMAGE_FOLDER);
+    const folder = imageFolder_(true);
     const blob = Utilities.newBlob(Utilities.base64Decode(data), mime, str_(p.name) || "product.jpg");
     const file = folder.createFile(blob);
     try {

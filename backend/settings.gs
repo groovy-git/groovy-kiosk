@@ -121,7 +121,7 @@ function apiSaveSettings_(p, ctx) {
             message = on ? "Saved. Nightly email is ON — arrives between " + hourLabel_(h) + " and " + hourLabel_((h + 1) % 24) + "." : "Saved. Nightly email is OFF.";
         } catch (e) {
             console.error("syncNightlyTrigger_", e);
-            message = "Settings saved, but the nightly email could not be scheduled. Open the Sheet → Groovy POS menu once to grant permission, then save again.";
+            message = "Settings saved, but the nightly email could not be scheduled. Open the Sheet → Groovy Kiosk menu once to grant permission, then save again.";
         }
     }
     if (setting_("invoice_pdfs") !== pdfBefore) {
@@ -129,7 +129,7 @@ function apiSaveSettings_(p, ctx) {
             syncPdfTrigger_();
         } catch (e) {
             console.error("syncPdfTrigger_", e);
-            message = "Settings saved, but the invoice PDF timer could not be changed. Open the Sheet → Groovy POS → 1. Setup / repair sheets once, then save again.";
+            message = "Settings saved, but the invoice PDF timer could not be changed. Open the Sheet → Groovy Kiosk → 1. Setup / repair sheets once, then save again.";
         }
     }
     return { message, data: publicSettings_(ctx) };

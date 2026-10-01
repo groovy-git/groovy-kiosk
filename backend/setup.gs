@@ -1,11 +1,11 @@
 /**
- * One-time setup, run from the spreadsheet menu "Groovy POS" (or the Apps Script editor).
+ * One-time setup, run from the spreadsheet menu "Groovy Kiosk" (or the Apps Script editor).
  * setupSheets() is safe to run again: it only creates what is missing.
  */
 
 function onOpen() {
     SpreadsheetApp.getUi()
-        .createMenu("Groovy POS")
+        .createMenu("Groovy Kiosk")
         .addItem("1. Setup / repair sheets", "setupSheets")
         .addItem("2. Load demo data (test copy only)", "seedDemo")
         .addItem("3. Reset test data (keep setup)…", "resetTestData")
@@ -77,7 +77,7 @@ function backupStatusLine_() {
     }
     return newest
         ? "Last finished backup: " + newest + "\n\n"
-        : "⚠ There is no finished backup yet. Cancel and run Groovy POS → Back up now first if you want one.\n\n";
+        : "⚠ There is no finished backup yet. Cancel and run Groovy Kiosk → Back up now first if you want one.\n\n";
 }
 
 /** The standard categories, written only when there are none. Returns how many were added. */
@@ -363,6 +363,11 @@ function setupSheets() {
         ensureMaintenanceTrigger_();
     } catch (e) {
         console.error("ensureMaintenanceTrigger_", e);
+    }
+    try {
+        imageFolder_(false); // a photo folder still carrying the app's old name is renamed here
+    } catch (e) {
+        console.error("imageFolder_", e);
     }
 
     // invoice folders used to be remembered by Drive id; they are found by name now, so these

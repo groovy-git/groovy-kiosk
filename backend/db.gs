@@ -35,7 +35,7 @@ function sheet_(name) {
     const k = "__sh_" + name;
     if (REQ_CACHE_.__api && REQ_CACHE_[k]) return REQ_CACHE_[k];
     const sh = ss_().getSheetByName(name);
-    if (!sh) throw new AppError_("Sheet '" + name + "' missing. Run Setup from the Groovy POS menu.");
+    if (!sh) throw new AppError_("Sheet '" + name + "' missing. Run Setup from the Groovy Kiosk menu.");
     if (REQ_CACHE_.__api) REQ_CACHE_[k] = sh;
     return sh;
 }
@@ -82,7 +82,7 @@ function readTable_(name) {
     const schema = SCHEMA[name];
     const keys = Object.keys(schema);
     // header + data in one read; a missing/renamed last column means Setup hasn't run after an update
-    const outdated = () => new AppError_("The app was updated — open the Google Sheet and run Groovy POS → 1. Setup / repair sheets.", "SETUP");
+    const outdated = () => new AppError_("The app was updated — open the Google Sheet and run Groovy Kiosk → 1. Setup / repair sheets.", "SETUP");
     let vals;
     try {
         vals = sh.getRange(1, 1, Math.max(1, sh.getLastRow()), keys.length).getValues();
@@ -129,7 +129,7 @@ function headerCell_(sh, name, field) {
     const c = keys.indexOf(field) + 1;
     if (c < 1) throw new Error("Unknown column " + field + " on " + name);
     if (String(headerValue_(sh, name, c)) !== field)
-        throw new AppError_("The app was updated — open the Google Sheet and run Groovy POS → 1. Setup / repair sheets.", "SETUP");
+        throw new AppError_("The app was updated — open the Google Sheet and run Groovy Kiosk → 1. Setup / repair sheets.", "SETUP");
     return c;
 }
 

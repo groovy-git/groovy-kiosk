@@ -189,7 +189,7 @@ const returnCapOf = (settings) => {
 
 const REASONS = ["Damaged / leaked", "Wrong item", "Wrong size", "Customer changed mind"];
 
-// invoice PDF in Google Drive (Groovy POS/Sales_Invoices) — made on the server, so the app stays light
+// invoice PDF in Google Drive (Groovy Kiosk/Sales_Invoices) — made on the server, so the app stays light
 function DrivePdf({ sale, onSaved }) {
   const { isAdmin, toast } = useApp();
   const [busy, setBusy] = useState(false);

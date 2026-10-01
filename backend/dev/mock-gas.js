@@ -133,7 +133,7 @@ class Sheet {
 
 class Spreadsheet {
     constructor() { this.sheets = [new Sheet("Sheet1")]; }
-    getName() { return "Groovy POS Data"; }
+    getName() { return "Groovy Kiosk Data"; }
     getSheetByName(n) { return this.sheets.find((s) => s.name === n) || null; }
     getId() { return "SHEET_FILE"; }
     insertSheet(n) { const s = new Sheet(n); this.sheets.push(s); return s; }
@@ -183,7 +183,7 @@ function createDrive() {
         return o;
     };
     const root = make("folder", "My Drive", null);
-    const sheetFile = make("file", "Groovy POS Data", root);
+    const sheetFile = make("file", "Groovy Kiosk Data", root);
     items.delete(sheetFile.id);
     sheetFile.id = "SHEET_FILE";
     items.set("SHEET_FILE", sheetFile);
