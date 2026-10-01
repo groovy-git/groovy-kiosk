@@ -2325,7 +2325,7 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("stock mover: stock refresh works", mv("getStock", {}, 1).data.changed[MV] === 20);
     check("stock mover: a branch not ticked for them is refused", mv("getCatalog", {}, B3).code === "BRANCH");
 
-    // the one thing they do
+    // the two things they do. First, moving stock:
     const moTr = mv("transferStock", { to_branch_id: B2, note: "Weekend", lines: [{ variant_id: MV, qty: 5 }] }, 1);
     check("stock mover: can send stock to another branch", moTr.success && /^TR\d{5}$/.test(moTr.data.transfer_no), moTr);
     check("...and it leaves one branch and arrives at the other", stockAtM(1) === 15 && stockAtM(B2) === 5 && stockAtM(0) === 20, [stockAtM(1), stockAtM(B2)]);
@@ -2336,22 +2336,35 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("stock mover: sees the branch's transfers", moList.success && moList.data.some((t) => t.id === moTr.data.id && t.user_name === "Mover Mo" && t.items[0].qty === 5), moList);
     check("the transfer is in the owner's activity log under their name", oc("listLogs", {}).data.some((l) => l.action === "TRANSFER" && l.user_name === "Mover Mo"));
 
+    // ...and second, putting a count right (a bottle broken on the way, a recount)
+    const moAdj = mv("adjustStock", { variant_id: MV, mode: "remove", qty: 2, reason: "damage", note: "Broke on the way" }, 1);
+    check("stock mover: can remove damaged stock", moAdj.success && moAdj.data.stock_qty === 13 && stockAtM(1) === 13, moAdj);
+    check("...and is told the new stock and nothing else (no cost)", Object.keys(moAdj.data).sort().join() === "id,stock_qty", Object.keys(moAdj.data));
+    check("...and can add", mv("adjustStock", { variant_id: MV, mode: "add", qty: 1, reason: "other" }, 1).data.stock_qty === 14);
+    check("...and can set a count, at that branch only", mv("adjustStock", { variant_id: MV, mode: "set", qty: 15 }, 1).data.stock_qty === 15 && stockAtM(1) === 15 && stockAtM(B2) === 4, [stockAtM(1), stockAtM(B2)]);
+    check("...but cannot take stock below zero", /cannot go below 0/.test(mv("adjustStock", { variant_id: MV, mode: "remove", qty: 16, reason: "damage" }, 1).message) && stockAtM(1) === 15);
+    check("...nor adjust at a branch not ticked for them", mv("adjustStock", { variant_id: MV, mode: "set", qty: 9 }, B3).code === "BRANCH" && stockAtM(B3) === 1);
+    check("the adjustment is in the owner's activity log under their name", oc("listLogs", {}).data.some((l) => l.action === "ADJUST" && l.user_name === "Mover Mo" && /damage -2/.test(l.details)));
+    check("...and in the product's stock history, for the owner to read", oc("movements", { variant_id: MV }, 1).data.some((m) => m.type === "damage" && m.qty === -2 && m.user_name === "Mover Mo" && m.note === "Broke on the way"));
+
     // everything else is closed, whatever the app shows: walk every action the server has
-    const moOpen = ["bootstrap", "me", "logout", "changePassword", "getSettings", "getCatalog", "getStock", "transferStock", "listTransfers"];
+    const moOpen = ["bootstrap", "me", "logout", "changePassword", "getSettings", "getCatalog", "getStock", "transferStock", "listTransfers", "adjustStock"];
     const acts = mEnv.ctx.actions_();
     const signedIn = Object.keys(acts).filter((a) => !acts[a].public);
     const listed = signedIn.filter((a) => acts[a].roles.indexOf("stock_mover") >= 0);
-    check("stock mover: listed on those nine actions and no other", listed.sort().join() === moOpen.slice().sort().join(), listed);
+    check("stock mover: listed on those ten actions and no other", listed.sort().join() === moOpen.slice().sort().join(), listed);
     const leaks = signedIn.filter((a) => moOpen.indexOf(a) < 0 && mv(a, {}, 1).code !== "FORBIDDEN");
     check("stock mover: every other action is refused", leaks.length === 0, leaks);
-    ["dashboard", "listSales", "getSale", "report", "movements", "listCustomers", "customerHistory", "listExpenses", "completeSale", "stockIn", "adjustStock", "stockInBatches", "emailDayClose", "listSellers"].forEach((a) =>
+    ["dashboard", "listSales", "getSale", "report", "movements", "listCustomers", "customerHistory", "listExpenses", "completeSale", "stockIn", "stockInBatches", "emailDayClose", "listSellers"].forEach((a) =>
         check("stock mover refused: " + a, mv(a, {}, 1).code === "FORBIDDEN"));
 
-    // the other three roles are where they were on those nine actions
+    // the other three roles are where they were on those ten actions
     const three = (a) => acts[a].roles.filter((r) => r !== "stock_mover").join();
     check("those actions are still open to owner, manager and salesperson", moOpen.slice(0, 7).every((a) => three(a) === "owner,manager,salesperson"), moOpen.slice(0, 7).map(three));
     check("transfers are still closed to a salesperson", three("transferStock") === "owner,manager" && three("listTransfers") === "owner,manager"
         && mEnv.call("transferStock", { to_branch_id: B2, lines: [{ variant_id: MV, qty: 1 }] }, SAM, 1).code === "FORBIDDEN");
+    check("adjusting stock is still closed to a salesperson", three("adjustStock") === "owner,manager"
+        && mEnv.call("adjustStock", { variant_id: MV, mode: "remove", qty: 1, reason: "damage" }, SAM, 1).code === "FORBIDDEN" && stockAtM(1) === 15);
 
     // never a name to bill under
     const soldBy = oc("listSellers", {}, 1).data;

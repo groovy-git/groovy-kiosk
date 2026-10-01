@@ -12,7 +12,7 @@ const ALL_ = ["owner", "manager", "salesperson"];
 // of the two lists below — a new action is closed to them until someone opens it on purpose.
 const MOVER_ = "stock_mover";
 const SIGNED_IN_ = ALL_.concat([MOVER_]); // logging in and seeing products + stock
-const AM_MOVER_ = AM_.concat([MOVER_]); // moving stock between branches
+const AM_MOVER_ = AM_.concat([MOVER_]); // moving stock between branches, and adjusting it
 
 // built lazily: Apps Script evaluates files in load order, so top-level code
 // must not reference functions from other files
@@ -66,7 +66,7 @@ function actions_() {
     importCatalog: { fn: apiImportCatalog_, roles: AM_ },
     stockIn: { fn: apiStockIn_, roles: AM_ },
     stockInBatches: { fn: apiStockInBatches_, roles: AM_ },
-    adjustStock: { fn: apiAdjustStock_, roles: AM_ },
+    adjustStock: { fn: apiAdjustStock_, roles: AM_MOVER_ },
     transferStock: { fn: apiTransferStock_, roles: AM_MOVER_ },
     listTransfers: { fn: apiListTransfers_, roles: AM_MOVER_ },
     voidSale: { fn: apiVoidSale_, roles: AM_ },

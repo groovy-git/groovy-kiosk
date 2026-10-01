@@ -15,7 +15,7 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
     - **Owner**: everything.
     - **Manager**: stock, returns of any size, expenses, reports.
     - **Salesperson**: billing, with a discount limit, and returns up to a rupee limit you set.
-    - **Stock Mover**: sees products and stock at the branches you tick, and moves stock between branches. No billing, and no sales, customers, expenses or reports.
+    - **Stock Mover**: sees products and stock at the branches you tick, moves stock between branches and adjusts stock (damage, a corrected count). No billing, and no sales, customers, expenses or reports.
     - Owner, managers and salespeople can all sell, and every bill records who sold it.
 
 ---

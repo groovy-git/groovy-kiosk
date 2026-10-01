@@ -48,7 +48,7 @@ export default function UsersPage() {
       <div className="page">
         <p className="small muted" style={{ marginTop: 0 }}>
           Everyone can sell. Managers also handle stock, returns, expenses and reports. Only the owner manages staff and settings.
-          {multiBranch && " A Stock Mover only moves stock between branches and sees no sales."}
+          {multiBranch && " A Stock Mover only moves and adjusts stock, and sees no sales."}
         </p>
         {!list ? (
           <SkeletonList />
@@ -158,7 +158,7 @@ function UserSheet({ u, onClose, onSaved }) {
           ]}
         />
         {f.role === "stock_mover" && (
-          <div className="hint">Sees products and stock, and moves stock between the branches ticked below. No sales, customers or reports.</div>
+          <div className="hint">Sees products and stock at the branches ticked below, moves stock between branches and adjusts it. No sales, customers or reports.</div>
         )}
       </div>
       {multiBranch && f.role !== "owner" && (

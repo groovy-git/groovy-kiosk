@@ -226,6 +226,12 @@ function ItemSheet({ item, onClose }) {
           </button>
         </div>
       )}
+      {/* a stock mover corrects the count (a bottle broken on the way), but does not edit the product */}
+      {isMover && (
+        <button className="btn secondary block mt" onClick={() => setAdjust(true)}>
+          <SlidersHorizontal size={17} /> Adjust stock
+        </button>
+      )}
       {/* the history names every sale of the item, which is not a stock mover's to see */}
       {!isMover && (
         <button className="btn ghost block mt" onClick={loadMoves}>
