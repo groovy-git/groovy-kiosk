@@ -11,7 +11,7 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["logo.svg", "icons/apple-touch-icon.png"],
       manifest: {
-        name: "Groovy Fragrances Kiosk",
+        name: "Groovy Kiosk",
         short_name: "Groovy Kiosk",
         description: "Billing, stock and reports for Groovy Fragrances",
         theme_color: "#654321",
