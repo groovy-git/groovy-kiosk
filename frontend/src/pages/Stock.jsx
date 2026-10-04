@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, PackagePlus, Upload, Pencil, History, SlidersHorizontal, Boxes, Download, ArrowRightLeft } from "lucide-react";
 import { useApp } from "../store";
 import { api } from "../lib/api";
@@ -7,9 +7,9 @@ import { runBusy } from "../lib/busy";
 import { navigate, useRoute } from "../lib/router";
 import { searchItems, lookupBarcode } from "../lib/catalog";
 import { PAGE, MIN_SEARCH, useSearchQuery, useMoreOnScroll } from "../lib/listing";
-import { inr, fmtDateTime, qtyLabel, r3, plural } from "../lib/format";
+import { inr, fmtDateTime, qtyLabel, r3, plural, istDate } from "../lib/format";
 import { beepError, beepOk } from "../lib/feedback";
-import { parseCSV, downloadText, IMPORT_TEMPLATE, isWebsiteExport, fromWebsiteExport } from "../lib/files";
+import { parseCSV, downloadText, IMPORT_TEMPLATE, isWebsiteExport, fromWebsiteExport, catalogToImportCSV, withoutInfoColumns, importParts, checkImport } from "../lib/files";
 import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
 import TopBar from "../components/TopBar";
 import CameraScanner from "../components/CameraScanner";
@@ -114,7 +114,7 @@ function Products() {
               <ArrowRightLeft size={18} /> Transfer
             </button>
           )}
-          <button className="btn secondary" onClick={() => setImportOpen(true)} aria-label="Import products from CSV">
+          <button className="btn secondary" onClick={() => setImportOpen(true)} aria-label="Import or export products (CSV)">
             <Upload size={18} /> Import
           </button>
         </div>
@@ -343,7 +343,7 @@ function AdjustSheet({ open, item, onClose }) {
 }
 
 function ImportSheet({ open, onClose }) {
-  const { refreshCatalog, toast } = useApp();
+  const { refreshCatalog, toast, catalog, branches } = useApp();
   const [rows, setRows] = useState(null);
   const [website, setWebsite] = useState(null); // {skipped} when the file is the website's product export
   const [result, setResult] = useState(null);
@@ -355,6 +355,17 @@ function ImportSheet({ open, onClose }) {
       setResult(null);
     }
   }, [open]);
+  // what the chosen file would do, before anything is saved
+  const check = useMemo(() => (rows && rows.length ? checkImport(rows, catalog) : null), [rows, catalog]);
+  // the file's summary sits below the long explanation: bring it into view once a file is chosen
+  const summary = useRef(null);
+  useEffect(() => {
+    if (rows && summary.current && summary.current.scrollIntoView) summary.current.scrollIntoView({ block: "nearest" });
+  }, [rows]);
+  const exportAll = () => {
+    downloadText(`groovy-products-${istDate()}.csv`, catalogToImportCSV(catalog, branches));
+    toast(`Exported ${plural("row", catalog.items.length)}`, "success");
+  };
   const pick = (e) => {
     const f = e.target.files[0];
     if (!f) return;
@@ -366,7 +377,7 @@ function ImportSheet({ open, onClose }) {
         setRows(m.rows);
         setWebsite({ skipped: m.skipped, notKiosk: m.notKiosk, noKioskColumn: !!m.noKioskColumn });
       } else {
-        setRows(parsed);
+        setRows(withoutInfoColumns(parsed));
         setWebsite(null);
       }
       setResult(null);
@@ -375,13 +386,34 @@ function ImportSheet({ open, onClose }) {
   };
   const run = async () => {
     setBusy(true);
+    // a file within the server's limit goes in one request, as it always has; a bigger one in parts
+    const parts = importParts(rows);
+    const sum = { products: 0, variants: 0, updated: 0, unchanged: 0, stock_ignored: 0, barcodes_filled: 0, errors: [] };
+    let done = 0;
     try {
-      const r = await runBusy("Importing products…", () => api("importCatalog", { rows }));
-      setResult(r.data);
-      toast(r.message, r.data.errors.length ? "warn" : "success", 4000);
+      for (const part of parts) {
+        const r = await runBusy(parts.length > 1 ? `Importing products… part ${done + 1} of ${parts.length}` : "Importing products…", () => api("importCatalog", { rows: part }));
+        if (parts.length === 1) {
+          setResult(r.data);
+          toast(r.message, r.data.errors.length ? "warn" : "success", 4000);
+        } else {
+          ["products", "variants", "updated", "unchanged", "stock_ignored", "barcodes_filled"].forEach((k) => (sum[k] += r.data[k] || 0));
+          sum.errors = sum.errors.concat(r.data.errors);
+        }
+        done++;
+      }
+      if (parts.length > 1) {
+        setResult(sum);
+        toast(`Added ${sum.variants} sizes, updated ${sum.updated}, ${sum.unchanged} unchanged` + (sum.errors.length ? `, ${sum.errors.length} rows skipped` : ""), sum.errors.length ? "warn" : "success", 4000);
+      }
       refreshCatalog();
     } catch (e) {
-      toast(e.message, "error");
+      toast(e.message, "error", 5000);
+      // some parts are saved already: show them, and say the rest is still to do
+      if (done > 0) {
+        setResult({ ...sum, stopped: `Stopped after part ${done} of ${parts.length}. Import the same file again to finish — rows already saved are left as they are.` });
+        refreshCatalog();
+      }
     } finally {
       setBusy(false);
     }
@@ -390,12 +422,22 @@ function ImportSheet({ open, onClose }) {
     <Sheet
       open={open}
       onClose={onClose}
-      title="Import products (CSV)"
+      title="Import / export products (CSV)"
       footer={
-        rows && !result ? (
-          <Button className="block big" loading={busy} onClick={run} disabled={!rows.length}>
-            Import {rows.length} rows
-          </Button>
+        rows && (!result || result.stopped) ? (
+          <>
+            {/* next to the button, so it is read before pressing it; the details are in the card above */}
+            {check && (
+              <div className={"small center mb " + (check.damaged.length ? "bad-text" : "muted")} data-import-summary>
+                {check.damaged.length
+                  ? "This file can't be imported: Excel has changed its barcodes. See above."
+                  : `${check.matched} match products you have · ${check.fresh.length} new`}
+              </div>
+            )}
+            <Button className="block big" loading={busy} onClick={run} disabled={!rows.length || (check && check.damaged.length > 0)}>
+              Import {rows.length} rows
+            </Button>
+          </>
         ) : null
       }
     >
@@ -410,8 +452,15 @@ function ImportSheet({ open, onClose }) {
         On_Kiosk = yes are imported; the others are left out. A row with no
         barcode gets its Product Id as one, so the item can still be scanned, and a row with no minimum quantity gets a reorder level of 2 so it still
         warns when stock runs low. Anything already saved here — a barcode, a reorder level you set — is never replaced.
+        <br />
+        To change many products at once: export all products, change prices or details in Excel or Google Sheets, save as CSV and choose that file here. A file can change
+        prices, MRP, cost, reorder level, category, gender, HSN, GST and image. It cannot rename a product, brand or size, change a barcode or SKU that is already set, hide
+        or delete a product, or change stock; the columns starting with “info_” are only for reading.
       </p>
-      <button className="btn secondary block" onClick={() => downloadText("groovy-products-template.csv", IMPORT_TEMPLATE)}>
+      <button className="btn secondary block" onClick={exportAll} disabled={!catalog.items.length}>
+        <Download size={18} /> Export all products
+      </button>
+      <button className="btn ghost block mt" onClick={() => downloadText("groovy-products-template.csv", IMPORT_TEMPLATE)}>
         <Download size={18} /> Download template
       </button>
       <div className="field mt">
@@ -419,7 +468,7 @@ function ImportSheet({ open, onClose }) {
         <input className="input" type="file" accept=".csv,text/csv" onChange={pick} />
       </div>
       {rows && !result && (
-        <div className="card">
+        <div className="card" ref={summary}>
           {website && website.noKioskColumn && (
             <div className="bad-text small mb" style={{ fontWeight: 700 }}>
               This website file has no On_Kiosk column — export it again with On_Kiosk filled in. Nothing will be imported.
@@ -437,6 +486,31 @@ function ImportSheet({ open, onClose }) {
           <div className="small muted">
             First row: {rows[0] ? `${rows[0].brand || ""} ${rows[0].product || ""} ${rows[0].size_label || ""}${rows[0].sku ? " · " + rows[0].sku : ""}` : "—"}
           </div>
+          {check && (
+            <div className="small mt" data-import-check>
+              <b>{check.matched}</b> match products you already have · <b>{check.fresh.length}</b> would be added as new
+              {check.fresh.length > 0 && (
+                <>
+                  <div className="muted">
+                    New means no size with that barcode, SKU, or brand + product + size was found. A changed name or size in the file is added as a new product, not renamed.
+                  </div>
+                  {check.fresh.slice(0, 20).map((e) => (
+                    <div key={e.row}>
+                      Row {e.row}: {e.label || "—"}
+                    </div>
+                  ))}
+                  {check.fresh.length > 20 && <div className="muted">…and {check.fresh.length - 20} more</div>}
+                </>
+              )}
+              {check.newCategories.length > 0 && <div className="mt">New categories that would be created: {check.newCategories.join(", ")}</div>}
+              {check.damaged.length > 0 && (
+                <div className="bad-text mt" style={{ fontWeight: 700 }}>
+                  {plural("row", check.damaged.length)} {check.damaged.length === 1 ? "has" : "have"} a barcode or SKU that Excel turned into a number like 6.29E+12 (first: row {check.damaged[0].row}
+                  {check.damaged[0].label ? ", " + check.damaged[0].label : ""}). Nothing can be imported from this file. Export again, make your changes and save it once as CSV.
+                </div>
+              )}
+            </div>
+          )}
           {website && website.skipped.length > 0 && (
             <>
               <div className="bad-text small mt">{website.skipped.length} rows will be skipped:</div>
@@ -454,6 +528,7 @@ function ImportSheet({ open, onClose }) {
           <b>
             Added {result.variants} sizes in {result.products} new products · Updated {result.updated || 0} · {result.unchanged || 0} unchanged
           </b>
+          {result.stopped && <div className="bad-text small mt">{result.stopped}</div>}
           {result.barcodes_filled > 0 && (
             <div className="small muted mt">
               {result.barcodes_filled} {result.barcodes_filled === 1 ? "size had" : "sizes had"} no barcode — the website Product Id was used, so {result.barcodes_filled === 1 ? "it can" : "they can"} be scanned.
