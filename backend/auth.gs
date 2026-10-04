@@ -61,8 +61,57 @@ function cleanUserBranches_(p, role) {
     return { branch_id: home, branch_ids: list.join(",") };
 }
 
-function validatePassword_(pwd) {
-    if (!pwd || String(pwd).length < 6) fail_("Password must be at least 6 characters");
+/**
+ * Passwords.
+ *
+ * The app's address is public — it is inside the app every phone downloads — so what keeps a
+ * stranger out is the password and nothing else. One that is short, on everybody's list of common
+ * passwords, or made from the person's own name or phone is the first thing anyone tries.
+ *
+ * The rule is applied when a password is SET. One already in use keeps working, so nobody is shut
+ * out by a rule that came later; logging in with it tells the app, which asks for a better one.
+ */
+const PASSWORD_MIN_ = 8;
+const COMMON_PASSWORDS_ = [
+    "password", "password1", "password12", "password123", "pass1234", "pass@123", "pass@1234", "passw0rd", "p@ssw0rd", "p@ssword",
+    "admin123", "admin1234", "admin@123", "admin@1234", "administrator", "welcome1", "welcome123", "welcome@123",
+    "qwerty12", "qwerty123", "qwertyui", "qwertyuiop", "asdfghjk", "asdf1234", "1q2w3e4r", "1qaz2wsx", "abcd1234", "abc12345", "abcdefgh", "a1b2c3d4",
+    "iloveyou", "letmein1", "changeme", "default1", "test1234", "testtest", "india123", "india@123", "sairam123",
+    "demo1234", "groovy123", "groovy1234", "groovy@123", "groovy@1234", "kiosk123", "kiosk1234", "kiosk@123",
+];
+const WEAK_PASSWORD_MSG_ =
+    "Choose a password that is harder to guess: at least " + PASSWORD_MIN_ + " characters, not your name, email or phone, and not a common one like 12345678 or admin123.";
+
+// "" for a password fit to set, otherwise why not. `who` = {name, email, phone} of its owner, where known.
+function weakPassword_(pwd, who) {
+    const s = String(pwd || "");
+    if (s.length < PASSWORD_MIN_) return "Password must be at least " + PASSWORD_MIN_ + " characters";
+    const low = s.toLowerCase();
+    if (COMMON_PASSWORDS_.indexOf(low) >= 0) return WEAK_PASSWORD_MSG_;
+    if (/^groovy@\d{1,6}$/.test(low)) return WEAK_PASSWORD_MSG_; // the shape Setup used to hand out: 9,000 possibilities
+    if (/^\d+$/.test(s) || /^(.)\1+$/.test(s)) return WEAK_PASSWORD_MSG_; // a phone number, a date, or one key held down
+    const w = who || {};
+    const own = String(w.name || "").split(/\s+/)
+        .concat([String(w.email || "").split("@")[0], String(w.email || ""), String(w.phone || "").replace(/\D/g, "")])
+        .map((x) => x.toLowerCase())
+        .filter((x) => x.length >= 4);
+    if (own.some((x) => low.indexOf(x) >= 0)) return WEAK_PASSWORD_MSG_;
+    return "";
+}
+
+function validatePassword_(pwd, who) {
+    const why = weakPassword_(pwd, who);
+    if (why) fail_(why);
+}
+
+// A password to hand to someone: twelve random characters in three groups, none of them a letter or
+// digit that is easily read as another (no 0/o, 1/l/i). Typed once, then changed by its owner.
+function newPassword_() {
+    const abc = "abcdefghjkmnpqrstuvwxyz23456789";
+    const hex = (uuid_() + uuid_()).replace(/-/g, "");
+    let out = "";
+    for (let i = 0; i < 12; i++) out += (i && i % 4 === 0 ? "-" : "") + abc[parseInt(hex.substr(i * 4, 4), 16) % abc.length];
+    return out;
 }
 
 /* ---------- sessions ---------- */
@@ -115,6 +164,19 @@ function endUserSessions_(userId, exceptToken) {
 
 /* ---------- public actions ---------- */
 
+/**
+ * Wrong passwords are counted per email, in the script cache — never in the sheet, so a flood of
+ * them cannot hold the lock that billing needs.
+ *
+ * Five in a row pause the login for ten minutes. That alone still allowed five more every ten
+ * minutes, for ever: some 700 guesses a day. So there is a second count over six hours (the longest
+ * the cache keeps anything): twenty wrong and the login stays shut for the rest of that window.
+ * Someone already signed in is not affected, and a password reset by the owner opens it at once.
+ */
+const LOGIN_TRIES_ = 5;
+const LOGIN_TRIES_LONG_ = 20;
+const LOGIN_LONG_SECONDS_ = 21600;
+
 function apiLogin_(p) {
     const email = str_(p.email).toLowerCase();
     const pwd = String(p.password || "");
@@ -122,16 +184,21 @@ function apiLogin_(p) {
 
     const cache = CacheService.getScriptCache();
     const fk = "lf_" + email;
+    const lk = "lfd_" + email;
     const fails = num_(cache.get(fk), 0);
-    if (fails >= 5) fail_("Too many attempts. Try again in 10 minutes.");
+    const longFails = num_(cache.get(lk), 0);
+    if (longFails >= LOGIN_TRIES_LONG_) fail_("Too many wrong passwords. Ask the owner to reset your password, or try again in a few hours.");
+    if (fails >= LOGIN_TRIES_) fail_("Too many attempts. Try again in 10 minutes.");
 
     const u = findBy_("Users", "email", email);
     if (!u || hashPwd_(pwd, u.salt) !== u.pwd_hash) {
         cache.put(fk, String(fails + 1), 600);
+        cache.put(lk, String(longFails + 1), LOGIN_LONG_SECONDS_);
+        if (u && u.active && (fails + 1 === LOGIN_TRIES_ || longFails + 1 === LOGIN_TRIES_LONG_)) alertLockedLogin_(u, longFails + 1 >= LOGIN_TRIES_LONG_);
         fail_("Invalid email or password");
     }
     if (!u.active) fail_("Account inactive. Contact the owner.");
-    cache.remove(fk);
+    clearLoginLock_(email);
 
     const token = withLock_(() => {
         const now = nowStr_();
@@ -140,7 +207,57 @@ function apiLogin_(p) {
         log_({ user: u }, "LOGIN", "Users", u.id, "");
         return t;
     });
-    return { data: { token, user: publicUser_(u) } };
+    const data = { token, user: publicUser_(u) };
+    // the password just used would not be accepted as a new one: the app asks for a better one
+    if (weakPassword_(pwd, u)) data.weak_password = true;
+    return { data };
+}
+
+// a new password from the owner must work straight away, whatever was tried against the old one
+function clearLoginLock_(email) {
+    const e = str_(email).toLowerCase();
+    if (e) CacheService.getScriptCache().removeAll(["lf_" + e, "lfd_" + e]);
+}
+
+/**
+ * Tell the owner that a login has been shut by wrong passwords: it is either a member of staff who
+ * needs a new password, or somebody trying their luck — and until now nobody ever heard about it.
+ * One email per account in six hours, for real accounts only, and never allowed to get in the way:
+ * the person at the login screen gets the same answer whether or not this could be sent.
+ */
+function alertLockedLogin_(u, long) {
+    try {
+        const cache = CacheService.getScriptCache();
+        const k = "lfa_" + String(u.email).toLowerCase();
+        if (cache.get(k)) return;
+        cache.put(k, "1", LOGIN_LONG_SECONDS_);
+        const to = reportRecipients_();
+        if (!to.length) return;
+        const biz = setting_("business_name") || "Groovy Fragrances";
+        const pause = long ? "for the next few hours" : "for 10 minutes";
+        const lines = [
+            "The wrong password was entered " + (long ? LOGIN_TRIES_LONG_ : LOGIN_TRIES_) + " times for " + u.name + " (" + u.email + "), most recently at " + nowStr_().slice(0, 16) + ".",
+            "Their login is paused " + pause + ". Nobody got in, and anyone already logged in is not affected.",
+            "If it was " + u.name + ": nothing to do, or give them a new password in More → Staff, which opens the login again at once.",
+            "If it was not: their password has not been guessed. Make sure it is a strong one.",
+        ];
+        sendMail_(
+            to,
+            {
+                subject: biz + " Kiosk — wrong passwords for " + u.name,
+                text: lines.join("\n\n") + "\n\n— " + biz,
+                html:
+                    '<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px;background:#FAF7F2">' +
+                    '<div style="background:#fff;border-radius:12px;padding:28px;border-top:5px solid #F5BF03">' +
+                    '<h2 style="margin:0 0 8px;color:#654321;font-family:Georgia,serif">' + escHtml_(biz) + "</h2>" +
+                    lines.map((l) => '<p style="color:#403B37">' + escHtml_(l) + "</p>").join("") +
+                    "</div></div>",
+            },
+            {},
+        );
+    } catch (e) {
+        console.error("alertLockedLogin_", e);
+    }
 }
 
 function apiLogout_(p, ctx) {
@@ -148,7 +265,25 @@ function apiLogout_(p, ctx) {
     return { message: "Logged out" };
 }
 
+/**
+ * "Forgot password?" on the login screen is the owner's to switch on (Settings). It is the one way
+ * into an account for someone who is not logged in and does not know the password, and it lets a
+ * stranger who knows a staff email send that person code after code. Switched off — which is how
+ * it starts — a forgotten password is the owner's to reset, from the staff list or the Sheet's menu.
+ */
+const FORGOT_OFF_MSG_ = "Password reset by email is switched off. Ask the owner to reset your password.";
+function forgotPasswordOn_() {
+    return setting_("forgot_password") === "yes";
+}
+
+// eight digits, from the same source as the session keys rather than Math.random
+function resetCode_() {
+    const n = parseInt(uuid_().replace(/-/g, "").slice(0, 12), 16) % 100000000;
+    return ("00000000" + n).slice(-8);
+}
+
 function apiForgotPassword_(p) {
+    if (!forgotPasswordOn_()) fail_(FORGOT_OFF_MSG_);
     const email = str_(p.email).toLowerCase();
     // same answer whether or not the account exists, so nobody can use this to find out which
     // addresses are real staff accounts and then go after them
@@ -170,13 +305,14 @@ function apiForgotPassword_(p) {
     const u = findBy_("Users", "email", email);
     if (!u || !u.active) return { message: okMsg };
 
-    const otp = String(Math.floor(100000 + Math.random() * 900000));
+    const otp = resetCode_();
     withLock_(() => {
         const row = findBy_("Users", "email", email);
         row.otp = hashPwd_(otp, row.salt);
         row.otp_exp = fmtDateTime_(new Date(Date.now() + 10 * 60000));
         updateRows_("Users", [row]);
     });
+    cache.remove("otpf_" + email); // a new code starts with its own five tries
 
     const biz = setting_("business_name");
     MailApp.sendEmail({
@@ -197,6 +333,7 @@ function apiForgotPassword_(p) {
 }
 
 function apiResetPassword_(p) {
+    if (!forgotPasswordOn_()) fail_(FORGOT_OFF_MSG_);
     const email = str_(p.email).toLowerCase();
     const otp = str_(p.otp);
     validatePassword_(p.password);
@@ -204,12 +341,22 @@ function apiResetPassword_(p) {
     const fk = "otpf_" + email;
     if (num_(cache.get(fk), 0) >= 5) fail_("Too many attempts. Request a new code.");
 
-    return withLock_(() => {
+    // null = the code was wrong (reported after the lock is released, so a code thrown away below is saved first)
+    const done = withLock_(() => {
         const u = findBy_("Users", "email", email);
         if (!u || !u.otp || u.otp_exp < nowStr_() || hashPwd_(otp, u.salt) !== u.otp) {
-            cache.put(fk, String(num_(cache.get(fk), 0) + 1), 600);
-            fail_("Invalid or expired code");
+            const tries = num_(cache.get(fk), 0) + 1;
+            cache.put(fk, String(tries), 600);
+            // five wrong tries and the code itself is thrown away: guessing on needs a new one,
+            // and each new one is an email its owner sees
+            if (u && u.otp && tries >= 5) {
+                u.otp = "";
+                u.otp_exp = "";
+                updateRows_("Users", [u]);
+            }
+            return null;
         }
+        validatePassword_(p.password, u); // now that we know whose it is: not their own name or phone
         u.salt = newSalt_();
         u.pwd_hash = hashPwd_(String(p.password), u.salt);
         u.otp = "";
@@ -217,9 +364,12 @@ function apiResetPassword_(p) {
         u.updated_at = nowStr_();
         updateRows_("Users", [u]);
         endUserSessions_(u.id);
+        clearLoginLock_(email);
         log_({ user: u }, "RESET_PWD", "Users", u.id, "Password reset via email code");
         return { message: "Password changed. Please log in." };
     });
+    if (!done) fail_("Invalid or expired code");
+    return done;
 }
 
 /* ---------- own account ---------- */
@@ -229,7 +379,7 @@ function apiMe_(p, ctx) {
 }
 
 function apiChangePassword_(p, ctx) {
-    validatePassword_(p.new_password);
+    validatePassword_(p.new_password, ctx.user);
     return withLock_(() => {
         const u = findBy_("Users", "id", ctx.user.id);
         if (hashPwd_(String(p.current_password || ""), u.salt) !== u.pwd_hash) fail_("Current password is incorrect");
@@ -293,10 +443,11 @@ function apiSaveUser_(p, ctx) {
             u.branch_id = br.branch_id;
             u.branch_ids = br.branch_ids;
             if (p.password) {
-                validatePassword_(p.password);
+                validatePassword_(p.password, { name, email, phone: p.phone });
                 u.salt = newSalt_();
                 u.pwd_hash = hashPwd_(String(p.password), u.salt);
                 endUserSessions_(u.id);
+                clearLoginLock_(email); // the new password works at once, whatever was tried against the old one
             }
             u.updated_at = now;
             updateRows_("Users", [u]);
@@ -307,7 +458,7 @@ function apiSaveUser_(p, ctx) {
             return { message: "User updated", data: publicUser_(u) };
         }
         if (dup) fail_("Email already in use");
-        validatePassword_(p.password);
+        validatePassword_(p.password, { name, email, phone: p.phone });
         const salt = newSalt_();
         const u = {
             id: nextId_("Users"), name, email, phone: str_(p.phone), role,

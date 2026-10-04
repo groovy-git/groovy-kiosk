@@ -79,8 +79,10 @@ ctx.withLock_ = function (fn) { inLock++; try { return origLock(fn); } finally {
 run("withLock_ = this.withLock_"); // .gs code looks the name up globally
 
 // ---- base shop: demo catalogue, then grown to the live shop's size ----
-run(`(function(){const u=rows_("Users")[0];u.email="admin@demo.local";u.salt=newSalt_();u.pwd_hash=hashPwd_("admin123",u.salt);updateRows_("Users",[u]);})()`);
-ctx.seedDemo();
+run(`(function(){const u=rows_("Users")[0];u.email="admin@demo.local";u.salt=newSalt_();u.pwd_hash=hashPwd_("kiosk-boss-42",u.salt);updateRows_("Users",[u]);})()`);
+ctx.seedDemo("kiosk-test-42");
+// an older backend (--backend) seeds its own demo password: write the one this script logs in with
+run(`(function(){resetReqCache_();const u=findBy_("Users","email","sameer@demo.local");u.salt=newSalt_();u.pwd_hash=hashPwd_("kiosk-test-42",u.salt);updateRows_("Users",[u]);})()`);
 env.alerts.length = 0;
 console.log(`growing the sheet to ${BILLS} bills…`);
 const t0 = HostDate.now();
@@ -157,8 +159,8 @@ function api(step, action, payload, token, branch, summarize) {
     replies.push({ step, reply: clean(summarize ? { success: r.success, message: r.message, data: summarize(r.data), cv: r.cv, sv: r.sv } : r) });
     return r;
 }
-const T = call("login", { email: "admin@demo.local", password: "admin123" }).data.token;
-const S = call("login", { email: "sameer@demo.local", password: "demo1234" }).data.token;
+const T = call("login", { email: "admin@demo.local", password: "kiosk-boss-42" }).data.token;
+const S = call("login", { email: "sameer@demo.local", password: "kiosk-test-42" }).data.token;
 const catSum = (d) => d && { version: d.version, variants: d.variants.length, stock: d.variants.map((v) => [v.id, v.stock_qty, v.stock_by_branch]) };
 
 // the stock a phone ends up with after applying a getStock reply the way store.jsx refreshStock does
@@ -218,7 +220,7 @@ api("getSale after PDF", "getSale", { id: sale3.data.sale.id }, T, B1);
 api("getSale voided after PDF", "getSale", { id: sale1.data.sale.id }, T, B1);
 api("saveInvoicePdf (already saved)", "saveInvoicePdf", { id: sale3.data.sale.id }, T, B1);
 // people: writes then column reads in one request
-const u = api("saveUser", "saveUser", { name: "Scale Temp", email: "scale.temp@x.in", role: "salesperson", password: "secret1", branch_id: B1 }, T, B1);
+const u = api("saveUser", "saveUser", { name: "Scale Temp", email: "scale.temp@x.in", role: "salesperson", password: "shop-pass-1", branch_id: B1 }, T, B1);
 api("deleteUser (never sold)", "deleteUser", { id: u.data && u.data.id }, T, B1);
 api("deleteUser (has sales)", "deleteUser", { id: run(`rows_("Users").find(u=>u.email==="sameer@demo.local").id`) }, T, B1);
 api("bootstrap unchanged", "bootstrap", { catalog_version: run(`num_(setting_("catalog_version"),1)`), catalog_branch: B1 }, T, B1);

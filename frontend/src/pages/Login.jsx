@@ -1,12 +1,41 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useApp } from "../store";
 import { api } from "../lib/api";
 import { Button, Field, Sheet } from "../components/ui";
 import { unlockAudio } from "../lib/feedback";
 
+// Whether the shop offers "Forgot password?" is the owner's setting, and this screen is shown before anyone
+// is logged in — so it is asked for on its own, and remembered so the screen does not jump next time.
+const FORGOT_KEY = "gp_forgot";
+
 export default function Login() {
   const { login, toast } = useApp();
+  const [forgotOn, setForgotOn] = useState(() => {
+    try {
+      return localStorage.getItem(FORGOT_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  useEffect(() => {
+    let live = true;
+    api("loginOptions")
+      .then((r) => {
+        if (!live) return;
+        const on = !!(r.data && r.data.forgot_password);
+        setForgotOn(on);
+        try {
+          localStorage.setItem(FORGOT_KEY, on ? "1" : "0");
+        } catch {
+          /* private mode: asked again next time */
+        }
+      })
+      .catch(() => {}); // offline, or a server from before this setting: keep what was remembered
+    return () => {
+      live = false;
+    };
+  }, []);
   const [email, setEmail] = useState(() => localStorage.getItem("gp_last_email") || "");
   const [pwd, setPwd] = useState("");
   const [show, setShow] = useState(false);
@@ -49,9 +78,15 @@ export default function Login() {
         <Button className="block big" loading={busy} type="submit">
           Log in
         </Button>
-        <button type="button" className="btn ghost block mt" onClick={() => setForgot(true)}>
-          Forgot password?
-        </button>
+        {forgotOn ? (
+          <button type="button" className="btn ghost block mt" onClick={() => setForgot(true)}>
+            Forgot password?
+          </button>
+        ) : (
+          <p className="small muted center mt" style={{ marginBottom: 0 }}>
+            Forgot your password? Ask the owner to reset it.
+          </p>
+        )}
       </form>
       <ForgotSheet open={forgot} onClose={() => setForgot(false)} defaultEmail={email} toast={toast} />
     </div>
@@ -93,7 +128,7 @@ function ForgotSheet({ open, onClose, defaultEmail, toast }) {
         >
           {/* conditional on purpose: the server never says whether an address is registered, so this
               must not promise a code that a typo will never receive */}
-          <p className="muted small" style={{ marginTop: 0 }}>We'll send a 6-digit code if this email belongs to a staff account.</p>
+          <p className="muted small" style={{ marginTop: 0 }}>We'll send an 8-digit code if this email belongs to a staff account.</p>
           <Field label="Email" error={err}>
             <input className="input" type="email" value={email} onChange={(e) => setEmail(e.target.value)} required />
           </Field>
@@ -116,11 +151,11 @@ function ForgotSheet({ open, onClose, defaultEmail, toast }) {
           <p className="muted small" style={{ marginTop: 0 }}>
             If <b>{email.trim()}</b> is registered, the code is on its way. Nothing in a minute? The address may be wrong.
           </p>
-          <Field label="6-digit code from email">
-            <input className="input" inputMode="numeric" maxLength={6} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} required />
+          <Field label="8-digit code from email">
+            <input className="input" inputMode="numeric" maxLength={8} value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))} required />
           </Field>
-          <Field label="New password" hint="At least 6 characters" error={err}>
-            <input className="input" type="password" autoComplete="new-password" value={pwd} onChange={(e) => setPwd(e.target.value)} minLength={6} required />
+          <Field label="New password" hint="At least 8 characters, and not easy to guess" error={err}>
+            <input className="input" type="password" autoComplete="new-password" value={pwd} onChange={(e) => setPwd(e.target.value)} minLength={8} required />
           </Field>
           <Button className="block" loading={busy} type="submit">Change password</Button>
           <button type="button" className="btn ghost block mt" onClick={() => { setErr(""); setOtp(""); setStep(1); }}>

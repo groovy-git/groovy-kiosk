@@ -24,7 +24,7 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
 
 - **One Google account that owns everything.** It will own the Sheet and the script, and the day-close emails are sent from it.
     - Use a shop account (for example a new Gmail made for the shop), not a staff member's personal account.
-    - Setup makes this account's email the first Owner login, and "Forgot password" codes are sent to it.
+    - Setup makes this account's email the first Owner login.
 - **A GitHub account.** It's free.
 - **Cost:** nothing. Google Sheets, Apps Script and GitHub Pages (with a public repository) are all free.
 
@@ -78,7 +78,7 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
     git push -u origin main
     ```
 
-    - The repository is public, so anyone can read the code. That's safe: it holds no passwords or shop data, which stay in your Google Sheet.
+    - The repository is public, so anyone can read the code. That's safe: it holds no passwords or shop data, which stay in your Google Sheet. See **Security** below for what does keep the shop safe.
     - `backend/.clasp.json` and backup folders (`bk/`) are excluded by `.gitignore`. Keep it that way.
 
 2. In the repository, go to **Settings → Pages → Build and deployment → Source: GitHub Actions**.
@@ -272,6 +272,21 @@ Every bill is also kept as an A4 PDF in your Google Drive:
     - Make a copy of the Sheet (**File → Make a copy**) as that year's archive. Then ask your developer to trim old bills from the live Sheet.
     - Don't delete rows by hand. The tabs are linked (bill → items → payments → returns), and a half-deleted bill breaks reports and returns.
 
+## Security
+
+- **What is public, and why that is fine.** The code is public, and so is the app's web address (it is inside the app every phone downloads). Neither gives access to anything: the Google Sheet is only ever reached through the backend, and the backend refuses every action that is not logged in. Role, branch and prices are decided on the server, so an altered copy of the app gains nothing.
+- **So the passwords are the lock.**
+    - New passwords need at least 8 characters and cannot be a common one (`12345678`, `admin123`…), digits only, or the person's own name, email or phone.
+    - A password set before this rule keeps working; the app asks its owner to change it each time they log in.
+    - The password Setup shows for the first Owner, and the ones **Reset a staff password…** makes, are random. Change yours after the first login anyway.
+- **Wrong passwords.** Five wrong tries pause that login for 10 minutes; twenty in six hours shut it for the rest of the six hours. The owner is emailed when a login is shut. Anyone already logged in is not affected, and a new password from the owner opens the login at once.
+- **Forgotten passwords.** The owner gives a new one in **More → Staff**. For the owner's own, use **Groovy Kiosk → Reset a staff password…** in the Sheet.
+    - "Forgot password?" on the login screen is **off** unless you turn it on in **Settings → Billing**. On, anyone who knows a staff email can have an 8-digit reset code sent to that address.
+- **The Google account that owns the Sheet is the master key.** Turn on 2-step verification for it, and keep the list of people who can edit the Sheet short: whoever can edit the Sheet can reset any password.
+- **Demo data and test copies.**
+    - **Load demo data** adds three demo staff (`@demo.local`) with a password shown once. Delete them in **More → Staff** before the shop goes live; **Reset test data** keeps staff.
+    - A copy of the Sheet with its own web app is a second door to the same kind of data. Delete test deployments you no longer use (**Deploy → Manage deployments → Archive**).
+
 ## Troubleshooting
 
 | Problem                                                   | Fix                                                                                                                      |
@@ -280,7 +295,7 @@ Every bill is also kept as an A4 PDF in your Google Drive:
 | App shows old screens                                     | Close the app fully and reopen it. The update installs automatically.                                                    |
 | Camera doesn't open                                       | Allow camera access for the site or app in phone settings. On iPhone, use Safari to install the app.                     |
 | "Sheet … missing"                                         | Run **Groovy Kiosk → 1. Setup / repair sheets** again. It is safe to repeat.                                               |
-| Forgot the owner password                                     | Use **Forgot password?** on the login screen. A 6-digit code is emailed to you.                                          |
+| Forgot the owner password                                 | Open the Sheet and use **Groovy Kiosk → Reset a staff password…**. Another owner can also set one in **More → Staff**. |
 | "The app was updated — run Setup…"                        | Open the Sheet and run **Groovy Kiosk → 1. Setup / repair sheets**.                                                        |
 | "You are not assigned to any active branch"               | Owner: go to **Staff** and set the person's **Works at**, or turn the branch back on in **Settings → Branches**.         |
 | "Server busy, please try again"                           | Two phones saved at the same moment. Tap again.                                                                          |
@@ -301,7 +316,7 @@ Run everything locally, without Google, using a demo shop:
 
 ```bash
 cd frontend && npm install
-npm run dev:mock        # terminal 1: API on :8787 with demo data (admin@demo.local / admin123)
+npm run dev:mock        # terminal 1: API on :8787 with demo data (logins are printed when it starts)
 npm run dev             # terminal 2: app on http://localhost:5173 (also open it on your phone via your PC's IP)
 node ../backend/dev/e2e.js   # backend end-to-end tests
 ```

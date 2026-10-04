@@ -94,6 +94,14 @@ export default function SettingsPage() {
               <Seg value={f.invoice_pdfs || "yes"} onChange={set("invoice_pdfs")} options={[{ value: "yes", label: "On" }, { value: "no", label: "Off" }]} />
               <div className="hint">Every night at 2 am, the day’s bills and credit notes are saved as PDFs in the “Sales_Invoices” folder next to the Sheet. Checkout is not slowed down. Any bill can also be saved by hand from Sales → bill.</div>
             </div>
+            <div className="field">
+              <label>“Forgot password?” on the login screen</label>
+              <Seg value={f.forgot_password || "no"} onChange={set("forgot_password")} options={[{ value: "no", label: "Off (safer)" }, { value: "yes", label: "On" }]} />
+              <div className="hint">
+                Off: someone who forgets their password asks you, and you give them a new one in More → Staff. On: anyone who knows a staff email can have a reset code sent
+                to it.
+              </div>
+            </div>
             <Field label="Expense categories" hint="Comma separated"><textarea className="input" value={f.expense_categories || ""} onChange={set("expense_categories")} /></Field>
           </div>
         )}

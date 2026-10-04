@@ -135,7 +135,7 @@ function resetStaffPassword_(email) {
         const wanted = str_(email).toLowerCase();
         const u = rows_("Users").find((x) => String(x.email).toLowerCase() === wanted);
         if (!u) fail_("No staff member has the email " + email);
-        const pwd = "groovy@" + Math.floor(1000 + Math.random() * 9000);
+        const pwd = newPassword_();
         u.salt = newSalt_();
         u.pwd_hash = hashPwd_(pwd, u.salt);
         u.otp = ""; // a code that was already on its way must not still work
@@ -143,6 +143,7 @@ function resetStaffPassword_(email) {
         u.updated_at = nowStr_();
         updateRows_("Users", [u]);
         endUserSessions_(u.id); // anyone signed in as them is signed out, as an app password change does
+        clearLoginLock_(u.email); // and the new password works at once, however many wrong ones were tried
         log_({ user: { id: 0, name: "Sheet owner" } }, "UPDATE", "Users", u.id, "Password reset for " + u.name);
         return { name: u.name, role: u.role, active: u.active, password: pwd };
     });
@@ -400,7 +401,7 @@ function setupSheets() {
             email = Session.getEffectiveUser().getEmail();
         } catch (e) {}
         email = (email || "owner@groovyfragrances.in").toLowerCase();
-        const pwd = "groovy@" + Math.floor(1000 + Math.random() * 9000);
+        const pwd = newPassword_();
         const salt = newSalt_();
         appendRows_("Users", [
             { id: 1, name: "Owner", email, phone: "", role: "owner", pwd_hash: hashPwd_(pwd, salt), salt, active: 1, otp: "", otp_exp: "", created_at: now, updated_at: now },
@@ -429,7 +430,12 @@ function showWebAppUrl() {
 
 /* ---------- demo data ---------- */
 
-function seedDemo() {
+/**
+ * `fixedPwd` is for the dev scripts, which log the demo staff in. Run from the Sheet's menu there is
+ * none, and the demo staff get a random password that is shown once: this file is public, so a
+ * password written in it would be a known way into any sheet demo data was ever loaded into.
+ */
+function seedDemo(fixedPwd) {
     resetReqCache_();
     if (rows_("Products").length) {
         alert_("Products already exist — demo data is only for an empty test copy of the sheet.");
@@ -491,15 +497,16 @@ function seedDemo() {
         .filter((l) => l.qty > 0);
     apiTransferStock_({ to_branch_id: kn, lines: moveLines, note: "Opening stock for new branch" }, ctx);
 
-    // demo staff (password demo1234): home branch, all may switch
+    // demo staff, one password between them: home branch, all may switch
     resetReqCache_();
+    const demoPwd = typeof fixedPwd === "string" && fixedPwd ? fixedPwd : newPassword_();
     const staff = [
         ["Imran (Manager)", "manager@demo.local", "manager", 1],
         ["Sameer", "sameer@demo.local", "salesperson", 1],
         ["Ayesha", "ayesha@demo.local", "salesperson", kn],
     ];
     staff.forEach((s) => {
-        if (!findBy_("Users", "email", s[1])) apiSaveUser_({ name: s[0], email: s[1], role: s[2], password: "demo1234", branch_id: s[3] }, ctx);
+        if (!findBy_("Users", "email", s[1])) apiSaveUser_({ name: s[0], email: s[1], role: s[2], password: demoPwd, branch_id: s[3] }, ctx);
     });
 
     // ~3 weeks of demo bills spread across staff
@@ -553,7 +560,10 @@ function seedDemo() {
     ];
     exp.forEach((e, i) => apiSaveExpense_({ category: e[0], title: e[1], amount: e[2], method: "cash", date: daysAgoStr_(e[3]) }, Object.assign({}, ctx, { branch_id: i % 2 ? kn : 1 })));
 
-    alert_("Demo data loaded: 2 branches (Kondhwa, Kalyani Nagar), " + demo.length + " products, " + n + " bills, 3 staff users (password demo1234).");
+    alert_(
+        "Demo data loaded: 2 branches (Kondhwa, Kalyani Nagar), " + demo.length + " products, " + n + " bills, 3 staff users (password " + demoPwd + ").\n\n" +
+            "The demo staff are manager@demo.local, sameer@demo.local and ayesha@demo.local. Delete them in More → Staff before the shop goes live.",
+    );
 }
 
 // (re)installs the nightly day-close email timer as Settings say (on/off, hour). A timer runs the code

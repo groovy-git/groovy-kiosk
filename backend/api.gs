@@ -25,6 +25,8 @@ function actions_() {
     login: { fn: apiLogin_, public: true },
     forgotPassword: { fn: apiForgotPassword_, public: true },
     resetPassword: { fn: apiResetPassword_, public: true },
+    // what the login screen needs before anyone is logged in: whether to offer "Forgot password?"
+    loginOptions: { fn: () => ({ data: { forgot_password: forgotPasswordOn_() } }), public: true },
 
     // everyone logged in, the stock mover included
     bootstrap: { fn: apiBootstrap_, roles: SIGNED_IN_ },
@@ -104,7 +106,7 @@ function doPost(e) {
 const READ_ACTIONS_ = {
     bootstrap: 1, getCatalog: 1, getStock: 1, dashboard: 1, listSales: 1, getSale: 1, report: 1, listCustomers: 1, findCustomer: 1,
     listHeld: 1, movements: 1, listExpenses: 1, listUsers: 1, listLogs: 1, customerHistory: 1, listSellers: 1,
-    getSettings: 1, stockInBatches: 1, listTransfers: 1, listBranches: 1, me: 1, ping: 1,
+    getSettings: 1, stockInBatches: 1, listTransfers: 1, listBranches: 1, me: 1, ping: 1, loginOptions: 1,
 };
 
 /**
@@ -118,9 +120,17 @@ const READ_ACTIONS_ = {
 function dispatchOnce_(req) {
     const id = req && typeof req.req_id === "string" && /^[A-Za-z0-9-]{8,64}$/.test(req.req_id) ? req.req_id : "";
     if (!id) return dispatch_(req);
+    // A saved reply is handed back before anyone is asked who they are, so it must be worth nothing
+    // to anyone else. It is filed under the request AND under something only its sender has: the
+    // session, for whoever is logged in; and for the actions that need no login — a login's reply IS
+    // a session — a fingerprint of what was sent, the password included. The phone that retries
+    // sends the very same thing and is answered as before; a request id on its own opens nothing.
+    const acts = actions_();
+    const def = Object.prototype.hasOwnProperty.call(acts, req.action) ? acts[req.action] : null;
+    if (!def) return dispatch_(req);
     const isRead = !!READ_ACTIONS_[req.action];
     const cache = CacheService.getScriptCache();
-    const key = "rq_" + id;
+    const key = "rq_" + id + "_" + (def.public ? sentMark_(req.payload) : typeof req.token === "string" ? req.token.slice(0, 24) : "");
     const seen = cache.get(key);
     if (seen === "PENDING")
         return {
@@ -148,6 +158,12 @@ function dispatchOnce_(req) {
         cache.remove(key);
     }
     return res;
+}
+
+// a fingerprint of a request's contents: the same contents give the same mark, and nothing can be read back out of it
+function sentMark_(payload) {
+    const bytes = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, JSON.stringify(payload === undefined ? {} : payload), Utilities.Charset.UTF_8);
+    return Utilities.base64Encode(bytes).slice(0, 24);
 }
 
 function doGet() {

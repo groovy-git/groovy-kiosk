@@ -201,7 +201,7 @@ function UserSheet({ u, onClose, onSaved }) {
           </div>
         </>
       )}
-      <Field label={u.id ? "New password (leave empty to keep)" : "Password"} hint="At least 6 characters. Share it with the staff member privately.">
+      <Field label={u.id ? "New password (leave empty to keep)" : "Password"} hint="At least 8 characters, and not their name, phone or a common one like 12345678. Share it with the staff member privately.">
         <input className="input" type="text" autoComplete="new-password" value={pwd} onChange={(e) => setPwd(e.target.value)} />
       </Field>
       {u.id && !self && (

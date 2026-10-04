@@ -56,6 +56,8 @@ export function AppProvider({ children }) {
   const [branches, setBranches] = useState(() => load("gp_branches", []));
   const [branchId, setBranchId] = useState(getBranch);
   const [pickBranch, setPickBranch] = useState(false);
+  // the password just used to log in is one the shop would not accept as a new one: the app says so (App.jsx)
+  const [weakPassword, setWeakPassword] = useState(false);
   const [booting, setBooting] = useState(!!getToken());
   const [online, setOnline] = useState(navigator.onLine);
   const [cart, setCartState] = useState(() => load(cartKey(getBranch()), load("gp_cart", EMPTY_CART)));
@@ -179,6 +181,7 @@ export function AppProvider({ children }) {
 
   const logoutLocal = useCallback(() => {
     loginDashboard = null; // never shown to the next person
+    setWeakPassword(false);
     stockWanted.current = 0;
     clearToken();
     clearBranch(); // the next person on this phone starts at their own home branch
@@ -277,6 +280,7 @@ export function AppProvider({ children }) {
     async (email, password) => {
       const r = await api("login", { email, password, device: navigator.userAgent.slice(0, 100) });
       setToken(r.data.token);
+      setWeakPassword(!!r.data.weak_password);
       // a stock mover has no Home and no figures to fetch: the server would only refuse
       if (r.data.user.role !== "stock_mover") {
         const promise = api("dashboard");
@@ -365,6 +369,7 @@ export function AppProvider({ children }) {
     sellers, setSellers,
     branches, branchId, branch, multiBranch, myBranches, isAllBranches: multiBranch && !branchId,
     switchBranch, pickBranch, setPickBranch,
+    weakPassword, setWeakPassword,
     booting, online,
     login, logout, bootstrap,
     cart, setCart, clearCart,

@@ -302,6 +302,8 @@ const DEFAULT_SETTINGS = {
     nightly_report_skip_empty: "yes",
     // invoice & credit-note PDFs saved to Drive every 15 min (Sales_Invoices next to the Sheet)
     invoice_pdfs: "yes",
+    // "Forgot password?" on the login screen (a code by email). Off: a forgotten password is the owner's to reset.
+    forgot_password: "no",
     internal_barcode_seq: "0",
     catalog_version: "1",
     stock_version: "1",

@@ -30,7 +30,7 @@ const lib = (f) => import(pathToFileURL(path.join(__dirname, "..", "..", "fronte
     const { ctx, call } = env;
     ctx.setupSheets();
     const pwd = /Password: (\S+)/.exec(env.alerts.pop())[1];
-    ctx.seedDemo(); // 19 products, two branches, bills
+    ctx.seedDemo("kiosk-test-42"); // 19 products, two branches, bills (the password is for the logins below)
     const T = call("login", { email: "owner@groovy.test", password: pwd }).data.token;
     const oc = (a, p, b) => call(a, p, T, b === undefined ? 1 : b);
     const cats = oc("getCatalog", {}).data.categories;
@@ -161,8 +161,8 @@ const lib = (f) => import(pathToFileURL(path.join(__dirname, "..", "..", "fronte
         && again.reduce((n, r) => n + r.data.unchanged, 0) === rowsBig.length, again.map((r) => r.message));
 
     // ---- a manager's file has cost too; nobody else has the action ----
-    const M = call("login", { email: "manager@demo.local", password: "demo1234" }).data.token;
-    const S = call("login", { email: "sameer@demo.local", password: "demo1234" }).data.token;
+    const M = call("login", { email: "manager@demo.local", password: "kiosk-test-42" }).data.token;
+    const S = call("login", { email: "sameer@demo.local", password: "kiosk-test-42" }).data.token;
     check("a salesperson's product list has no cost to export, and import is closed to them",
         buildCatalog(call("getCatalog", {}, S, 1).data).items.every((i) => i.cost === undefined) && call("importCatalog", { rows: [{}] }, S, 1).code === "FORBIDDEN");
     check("a manager's export has cost", /,1200\.5,/.test(catalogToImportCSV(buildCatalog(call("getCatalog", {}, M, 1).data), branches)));

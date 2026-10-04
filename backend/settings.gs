@@ -72,6 +72,7 @@ const EDITABLE_SETTINGS_ = [
     "invoice_prefix", "tola_ml", "salesman_max_disc_pct", "salesperson_max_return", "return_days", "round_off",
     "allow_negative_stock", "receipt_footer", "expense_categories",
     "report_emails", "nightly_report", "nightly_report_hour", "nightly_report_skip_empty", "invoice_pdfs",
+    "forgot_password",
 ];
 const NIGHTLY_KEYS_ = ["nightly_report", "nightly_report_hour"];
 
@@ -91,6 +92,7 @@ function apiSaveSettings_(p, ctx) {
     }
     if (vals.nightly_report !== undefined && ["yes", "no"].indexOf(vals.nightly_report) < 0) fail_("Invalid nightly email option");
     if (vals.nightly_report_skip_empty !== undefined && ["yes", "no"].indexOf(vals.nightly_report_skip_empty) < 0) fail_("Invalid option");
+    if (vals.forgot_password !== undefined && ["yes", "no"].indexOf(vals.forgot_password) < 0) fail_("Invalid forgot-password option");
     if (vals.nightly_report_hour !== undefined) {
         const h = parseInt(vals.nightly_report_hour, 10);
         if (isNaN(h) || h < 0 || h > 23) fail_("Choose an hour between 0 and 23");

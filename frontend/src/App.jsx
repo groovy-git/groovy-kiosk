@@ -2,7 +2,7 @@ import { Component, Suspense, useEffect } from "react";
 import { Home as HomeIcon, ShoppingBag, Receipt, Boxes, Menu, Users, BarChart3, Wallet, Settings as Cog, LogOut, UserCircle, History, Package, ArrowRightLeft } from "lucide-react";
 import { useApp } from "./store";
 import { useRoute, navigate } from "./lib/router";
-import { Toasts, Spinner, SkeletonList, Empty } from "./components/ui";
+import { Toasts, Spinner, SkeletonList, Empty, Sheet } from "./components/ui";
 import TopBar from "./components/TopBar";
 import BusyOverlay from "./components/BusyOverlay";
 import { lazyScreen } from "./lib/lazyScreen";
@@ -157,6 +157,43 @@ class ScreenGuard extends Component {
       </div>
     );
   }
+}
+
+// Shown after logging in with a password the shop would no longer accept as a new one (short, common, or
+// the person's own name or phone). It still works — nobody is shut out by a rule that came later — but the
+// app's address is public, so a password like that is the first thing a stranger would try.
+function WeakPassword() {
+  const { weakPassword, setWeakPassword } = useApp();
+  if (!weakPassword) return null;
+  const later = () => setWeakPassword(false);
+  return (
+    <Sheet
+      open
+      onClose={later}
+      title="Your password is easy to guess"
+      footer={
+        <div className="row">
+          <button className="btn secondary grow" onClick={later}>
+            Later
+          </button>
+          <button
+            className="btn grow"
+            onClick={() => {
+              navigate("account");
+              later();
+            }}
+          >
+            Change it now
+          </button>
+        </div>
+      }
+    >
+      <p style={{ marginTop: 0 }}>
+        Anyone who knows your email could get into the shop's app with it. Choose a new one: at least 8 characters, not your name, email or phone, and not a common one like
+        12345678.
+      </p>
+    </Sheet>
+  );
 }
 
 // who may open which page (server enforces the same rules on every action)
@@ -314,6 +351,7 @@ export default function App() {
         )}
       </nav>
       <BranchPicker />
+      <WeakPassword />
       <Toasts />
       <BusyOverlay />
     </div>

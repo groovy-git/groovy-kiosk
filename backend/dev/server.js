@@ -1,7 +1,9 @@
 /**
  * Local dev API: runs the real backend (.gs files) on an in-memory sheet with demo data.
  *   node backend/dev/server.js      → http://localhost:8787
- * Logins (all): admin@demo.local / admin123, manager@demo.local, sameer@demo.local, ayesha@demo.local (demo1234)
+ * Logins, on this in-memory copy only: admin@demo.local / kiosk-boss-42, and manager@demo.local,
+ * sameer@demo.local, ayesha@demo.local / kiosk-test-42. weak@demo.local / groovy@1234 is an account
+ * whose password predates the password rule, to see what the app says to its owner.
  */
 const http = require("http");
 const { createEnv } = require("./mock-gas");
@@ -15,11 +17,17 @@ env.alerts.length = 0;
 // predictable admin login for local testing
 vm_run(`(function () {
     const u = rows_("Users")[0];
-    u.email = "admin@demo.local"; u.name = "Owner"; u.salt = newSalt_(); u.pwd_hash = hashPwd_("admin123", u.salt);
+    u.email = "admin@demo.local"; u.name = "Owner"; u.salt = newSalt_(); u.pwd_hash = hashPwd_("kiosk-boss-42", u.salt);
     updateRows_("Users", [u]);
 })()`);
-ctx.seedDemo();
+ctx.seedDemo("kiosk-test-42");
 console.log(env.alerts.pop());
+// a salesperson whose password was set before the rule existed (written straight in: the rule would refuse it)
+vm_run(`(function () {
+    resetReqCache_();
+    const salt = newSalt_(), now = nowStr_();
+    appendRows_("Users", [{ id: nextId_("Users"), name: "Weak Wasim", email: "weak@demo.local", phone: "", role: "salesperson", pwd_hash: hashPwd_("groovy@1234", salt), salt, active: 1, otp: "", otp_exp: "", created_at: now, updated_at: now, branch_id: 1, branch_ids: "" }]);
+})()`);
 
 function vm_run(code) {
     require("vm").runInContext(code, ctx);
@@ -69,5 +77,5 @@ http
         });
     })
     .listen(PORT, () =>
-        console.log(`Groovy Kiosk mock API on http://localhost:${PORT}\nLogin: admin@demo.local / admin123\nEmails are not sent locally — preview the latest at http://localhost:${PORT}/mail`),
+        console.log(`Groovy Kiosk mock API on http://localhost:${PORT}\nLogin: admin@demo.local / kiosk-boss-42 (staff: kiosk-test-42)\nEmails are not sent locally — preview the latest at http://localhost:${PORT}/mail`),
     );

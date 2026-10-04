@@ -47,12 +47,12 @@ const T = login.token;
 check("owner role", login.user.role === "owner");
 
 // ---- users ----
-ok(call("saveUser", { name: "Sameer", email: "sameer@x.in", role: "salesperson", password: "secret1" }, T), "add salesperson");
-ok(call("saveUser", { name: "Ayesha", email: "ayesha@x.in", role: "salesperson", password: "secret2" }, T), "add salesperson 2");
-ok(call("saveUser", { name: "Imran", email: "imran@x.in", role: "manager", password: "secret3" }, T), "add manager");
-const S1 = ok(call("login", { email: "sameer@x.in", password: "secret1" }), "salesperson login").token;
-const S2 = ok(call("login", { email: "ayesha@x.in", password: "secret2" }), "salesman2 login").token;
-const M = ok(call("login", { email: "imran@x.in", password: "secret3" }), "manager login").token;
+ok(call("saveUser", { name: "Sameer", email: "sameer@x.in", role: "salesperson", password: "shop-pass-1" }, T), "add salesperson");
+ok(call("saveUser", { name: "Ayesha", email: "ayesha@x.in", role: "salesperson", password: "shop-pass-2" }, T), "add salesperson 2");
+ok(call("saveUser", { name: "Imran", email: "imran@x.in", role: "manager", password: "shop-pass-3" }, T), "add manager");
+const S1 = ok(call("login", { email: "sameer@x.in", password: "shop-pass-1" }), "salesperson login").token;
+const S2 = ok(call("login", { email: "ayesha@x.in", password: "shop-pass-2" }), "salesman2 login").token;
+const M = ok(call("login", { email: "imran@x.in", password: "shop-pass-3" }), "manager login").token;
 check("salesperson cannot list users", call("listUsers", {}, S1).code === "FORBIDDEN");
 check("salesperson cannot add product", call("saveProduct", {}, S1).code === "FORBIDDEN");
 
@@ -308,9 +308,18 @@ check("deactivated session rejected", call("getCatalog", {}, S2).code === "AUTH_
 check("cannot delete user with sales", !call("deleteUser", { id: 2 }, T).success);
 
 // ---- password reset via OTP ----
+// "Forgot password?" starts switched off: nothing is sent, and no code can be used
+const fpMails = env.mails.length;
+const fpOff = call("forgotPassword", { email: "sameer@x.in" });
+check("forgot password is off until the owner switches it on", !fpOff.success && /switched off/.test(fpOff.message) && env.mails.length === fpMails, fpOff);
+check("...and so is resetting with a code", /switched off/.test(call("resetPassword", { email: "sameer@x.in", otp: "00000000", password: "newpass1" }).message));
+check("the login screen is told it is off", call("loginOptions", {}).data.forgot_password === false);
+check("only the owner can switch it", call("saveSettings", { settings: { forgot_password: "yes" } }, M).code === "FORBIDDEN" && !call("saveSettings", { settings: { forgot_password: "maybe" } }, T).success);
+ok(call("saveSettings", { settings: { forgot_password: "yes" } }, T), "forgot password switched on");
+check("the login screen is told it is on, without a login", call("loginOptions", {}).data.forgot_password === true);
 ok(call("forgotPassword", { email: "sameer@x.in" }), "forgot");
-const otp = /code is: (\d{6})/.exec(env.mails[env.mails.length - 1].body)[1];
-check("wrong otp", !call("resetPassword", { email: "sameer@x.in", otp: "000000", password: "newpass1" }).success);
+const otp = /code is: (\d{8})\n/.exec(env.mails[env.mails.length - 1].body)[1];
+check("wrong otp", !call("resetPassword", { email: "sameer@x.in", otp: "00000000", password: "newpass1" }).success);
 ok(call("resetPassword", { email: "sameer@x.in", otp, password: "newpass1" }), "reset");
 check("old session ended", call("getCatalog", {}, S1).code === "AUTH_EXPIRED");
 ok(call("login", { email: "sameer@x.in", password: "newpass1" }), "login new pwd");
@@ -343,30 +352,32 @@ check("the cap is per address — someone else is unaffected", call("forgotPassw
 
 // ---- the Sheet's own password reset: the way back in when email is no help ----
 // its own account, so resetting it cannot disturb the tokens the rest of the suite is using
-ok(call("saveUser", { name: "Reset Me", email: "resetme@x.in", role: "salesperson", password: "secret7" }, T), "add the account to reset");
-const S3 = ok(call("login", { email: "resetme@x.in", password: "secret7" }), "that account logs in").token;
+ok(call("saveUser", { name: "Reset Me", email: "resetme@x.in", role: "salesperson", password: "shop-pass-7" }, T), "add the account to reset");
+const S3 = ok(call("login", { email: "resetme@x.in", password: "shop-pass-7" }), "that account logs in").token;
 const otherStillValid = ok(call("getCatalog", {}, M), "manager token before the reset");
 const rsp = ctx.resetStaffPassword_("RESETME@x.in"); // matched whatever the case
-check("it returns a password and who it belongs to", /^groovy@\d{4}$/.test(rsp.password) && rsp.name === "Reset Me", rsp);
-check("the old password no longer works", !call("login", { email: "resetme@x.in", password: "secret7" }).success);
+check("it returns a password and who it belongs to", /^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/.test(rsp.password) && rsp.name === "Reset Me", rsp);
+check("the old password no longer works", !call("login", { email: "resetme@x.in", password: "shop-pass-7" }).success);
 ok(call("login", { email: "resetme@x.in", password: rsp.password }), "login with the new password");
 check("that person is signed out everywhere", call("getCatalog", {}, S3).code === "AUTH_EXPIRED");
 check("nobody else is signed out", !!otherStillValid && call("getCatalog", {}, M).success);
 check("a pending reset code is cleared", require("vm").runInContext('resetReqCache_(); (findBy_("Users","email","resetme@x.in").otp || "") === ""', ctx));
 check("an unknown address is refused", (() => { try { ctx.resetStaffPassword_("ghost@x.in"); return false; } catch (e) { return /No staff member/.test(e.message); } })());
 check("the new password is never written to the log",
-    require("vm").runInContext('resetReqCache_(); rows_("Activity_Logs").every((l) => String(l.details).indexOf("groovy@") < 0)', ctx));
+    require("vm").runInContext('resetReqCache_(); rows_("Activity_Logs").every((l) => String(l.details).indexOf(' + JSON.stringify(rsp.password) + ") < 0)", ctx));
 
 // ---- lost replies: retries with the same req_id never save twice ----
 const rqStock = () => call("getCatalog", {}, T, 1).data.variants.find((v) => v.id === vBottle.id).stock_qty;
 const rq0 = rqStock();
+// a saved reply is filed under the request id and the session that made it
+const rqKey = (id) => "rq_" + id + "_" + T.slice(0, 24);
 const rqA = call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 2, unit_cost: 40 }] }, T, 1, "req-test-0001");
 const rqA2 = call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 2, unit_cost: 40 }] }, T, 1, "req-test-0001");
 check("retry with same req_id: saved once", rqA.success && rqStock() === rq0 + 2, { rq0, now: rqStock() });
 check("retry with same req_id: same reply", JSON.stringify(rqA2) === JSON.stringify(rqA));
 call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 2, unit_cost: 40 }] }, T, 1, "req-test-0002");
 check("new req_id: saved again", rqStock() === rq0 + 4);
-env.cache.set("rq_req-test-0003", "PENDING");
+env.cache.set(rqKey("req-test-0003"), "PENDING");
 check("still running → IN_PROGRESS", call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 1 }] }, T, 1, "req-test-0003").code === "IN_PROGRESS" && rqStock() === rq0 + 4);
 const rqBad = call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 0 }] }, T, 1, "req-test-0004");
 const rqBad2 = call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 3 }] }, T, 1, "req-test-0004");
@@ -386,8 +397,8 @@ check("no req_id works as before", call("stockIn", { lines: [{ variant_id: vBott
 check("bad req_id ignored", call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 1 }] }, T, 1, "x").success && rqStock() === rq0 + 10);
 // a phone locked mid-save retries when it wakes, maybe much later: seen live-like in the stress test,
 // a transfer retried 3 hours on was saved twice because its reply was kept for only 10 minutes
-check("a save's reply is kept 6 hours, a read's 2 minutes", env.cacheTtl.get("rq_req-test-0001") === 21600 && env.cacheTtl.get("rq_req-test-0005") === 120,
-    { save: env.cacheTtl.get("rq_req-test-0001"), read: env.cacheTtl.get("rq_req-test-0005") });
+check("a save's reply is kept 6 hours, a read's 2 minutes", env.cacheTtl.get(rqKey("req-test-0001")) === 21600 && env.cacheTtl.get(rqKey("req-test-0005")) === 120,
+    { save: env.cacheTtl.get(rqKey("req-test-0001")), read: env.cacheTtl.get(rqKey("req-test-0005")) });
 env.expireCache(11 * 60);
 const rqLate = call("stockIn", { lines: [{ variant_id: vBottle.id, qty: 2, unit_cost: 40 }] }, T, 1, "req-test-0001");
 check("a retry 11 minutes later is not saved again", JSON.stringify(rqLate) === JSON.stringify(rqA) && rqStock() === rq0 + 10, { now: rqStock(), expected: rq0 + 10 });
@@ -565,12 +576,12 @@ ok(call("saveBranch", { id: 1, name: "Kondhwa", code: "" }, T), "rename branch 1
 check("code with bills can't change", !call("saveBranch", { id: 1, name: "Kondhwa", code: "KD" }, T).success);
 
 // staff: Ravi works anywhere (home Kondhwa), Kiran only at KN, Meena manages KN only
-ok(call("saveUser", { name: "Ravi", email: "ravi@x.in", role: "salesperson", password: "secret4", branch_id: 1 }, T), "add Ravi");
-ok(call("saveUser", { name: "Kiran", email: "kiran@x.in", role: "salesperson", password: "secret5", branch_id: KN, branch_ids: [KN] }, T), "add Kiran");
-ok(call("saveUser", { name: "Meena", email: "meena@x.in", role: "manager", password: "secret6", branch_id: KN, branch_ids: [KN] }, T), "add Meena");
-const RAVI = ok(call("login", { email: "ravi@x.in", password: "secret4" }), "Ravi login");
-const KIRAN = ok(call("login", { email: "kiran@x.in", password: "secret5" }), "Kiran login");
-const MEENA = ok(call("login", { email: "meena@x.in", password: "secret6" }), "Meena login").token;
+ok(call("saveUser", { name: "Ravi", email: "ravi@x.in", role: "salesperson", password: "shop-pass-4", branch_id: 1 }, T), "add Ravi");
+ok(call("saveUser", { name: "Kiran", email: "kiran@x.in", role: "salesperson", password: "shop-pass-5", branch_id: KN, branch_ids: [KN] }, T), "add Kiran");
+ok(call("saveUser", { name: "Meena", email: "meena@x.in", role: "manager", password: "shop-pass-6", branch_id: KN, branch_ids: [KN] }, T), "add Meena");
+const RAVI = ok(call("login", { email: "ravi@x.in", password: "shop-pass-4" }), "Ravi login");
+const KIRAN = ok(call("login", { email: "kiran@x.in", password: "shop-pass-5" }), "Kiran login");
+const MEENA = ok(call("login", { email: "meena@x.in", password: "shop-pass-6" }), "Meena login").token;
 check("Ravi may use both branches", RAVI.user.branch_ids.length === 2 && RAVI.user.home_branch_id === 1, RAVI.user);
 check("Kiran limited to KN", KIRAN.user.branch_ids.join() === String(KN) && KIRAN.user.home_branch_id === KN, KIRAN.user);
 
@@ -680,13 +691,13 @@ check("KN manager can't delete KD expense", /another branch/.test(call("deleteEx
 check("KN manager can't edit KD expense", /another branch/.test(call("saveExpense", { id: kdExp, title: "x", amount: 1 }, MEENA).message));
 // staff whose only branch is closed can't fall into "all branches"
 const TMP = ok(call("saveBranch", { name: "Temp", code: "TP" }, T), "temp branch").id;
-ok(call("saveUser", { name: "Tina", email: "tina@x.in", role: "salesperson", password: "secret7", branch_id: TMP, branch_ids: [TMP] }, T), "add Tina");
-const TINA = ok(call("login", { email: "tina@x.in", password: "secret7" }), "Tina login").token;
+ok(call("saveUser", { name: "Tina", email: "tina@x.in", role: "salesperson", password: "shop-pass-7", branch_id: TMP, branch_ids: [TMP] }, T), "add Tina");
+const TINA = ok(call("login", { email: "tina@x.in", password: "shop-pass-7" }), "Tina login").token;
 ok(call("saveBranch", { id: TMP, name: "Temp", code: "TP", active: 0 }, T), "close temp branch");
 check("staff with no active branch refused", branchesErr(call("dashboard", {}, TINA)) && branchesErr(call("listSales", {}, TINA, 0)));
 // old sessions are cleaned up at login
 vmRun(`appendRows_("Sessions", [{ token: "x".repeat(64), user_id: ${RAVI.user.id}, created_at: "2020-01-01 00:00:00", expires_at: "2020-02-01 00:00:00", device: "old" }]);`);
-ok(call("login", { email: "ravi@x.in", password: "secret4" }), "Ravi logs in again");
+ok(call("login", { email: "ravi@x.in", password: "shop-pass-4" }), "Ravi logs in again");
 check("expired sessions removed", !vmRun(`resetReqCache_(); rows_("Sessions").some((s) => s.device === "old")`));
 // sheet not upgraded after a code update → clear message, not a crash
 envM.ss.getSheetByName("Sales").getRange(1, schemaColsOf("Sales", envM)).setValue("");
@@ -718,7 +729,7 @@ const mistake = ok(call("saveProduct", {
 const mistakeVid = () => vmRun(`resetReqCache_(); (rows_("Variants").find((v) => v.barcode === "DEL0001") || {}).id || 0`);
 const mVid = mistakeVid();
 check("manager cannot delete product", call("deleteProduct", { id: mistake }, M, 1).code === "FORBIDDEN");
-const RAVI2 = ok(call("login", { email: "ravi@x.in", password: "secret4" }), "Ravi login for delete test").token;
+const RAVI2 = ok(call("login", { email: "ravi@x.in", password: "shop-pass-4" }), "Ravi login for delete test").token;
 const sDel = call("deleteProduct", { id: mistake }, RAVI2, 1);
 check("salesperson cannot delete product", sDel.code === "FORBIDDEN", sDel);
 const heldDel = ok(call("holdBill", { label: "del test", cart: { lines: [{ variant_id: mVid, qty: 1 }] } }, T, 1), "hold mistaken product");
@@ -828,7 +839,7 @@ check("credit note totals are one table too", pdfFiles().some((f) => /CREDIT NOT
 const pdfCount = pdfFiles().length;
 const pdf2 = ok(call("saveInvoicePdf", { id: pdfSale.id }, T, 1), "save PDF again");
 check("second press: already saved, no duplicate file", pdf2.already === true && pdfFiles().length === pdfCount);
-const RAVI3 = ok(call("login", { email: "ravi@x.in", password: "secret4" }), "Ravi login for PDF").token;
+const RAVI3 = ok(call("login", { email: "ravi@x.in", password: "shop-pass-4" }), "Ravi login for PDF").token;
 check("salesperson can't save someone else's bill PDF", call("saveInvoicePdf", { id: pdfSale.id }, RAVI3, 1).code === "FORBIDDEN");
 // GST hidden → plain INVOICE without HSN/GST columns
 const hidSale = ok(call("completeSale", Object.assign({}, pdfSaleReq, { client_ref: "pdf-2", gst_hidden: true, customer: {} }), T, 1), "gst-hidden sale").sale;
@@ -1143,9 +1154,9 @@ check("bootstrap skips an unchanged catalogue too", bootGate.catalog.unchanged =
 
 // cost price is manager-only, so a role change makes a cached catalogue the wrong shape for that
 // person — the version must move, or the gate above would keep handing them a cost-less copy
-const crewRes = ok(envR.call("saveUser", { name: "Crew", email: "crew@x.in", role: "salesperson", password: "secret9" }, RT2), "add a salesperson");
+const crewRes = ok(envR.call("saveUser", { name: "Crew", email: "crew@x.in", role: "salesperson", password: "shop-pass-9" }, RT2), "add a salesperson");
 const crewId = crewRes.id;
-const crewToken = () => envR.call("login", { email: "crew@x.in", password: "secret9" }).data.token;
+const crewToken = () => envR.call("login", { email: "crew@x.in", password: "shop-pass-9" }).data.token;
 const CREW = crewToken();
 const crewCat = envR.call("getCatalog", {}, CREW, 1).data;
 check("a salesperson's catalogue has no cost price", crewCat.variants.every((v) => v.avg_cost === undefined), Object.keys(crewCat.variants[0]));
@@ -1324,8 +1335,8 @@ envR2c.ctx.apiCompleteSale_(
 check("catalogue: stock is current even when the rest is kept", envR2c.call("getCatalog", {}, CCT).data.variants.find((v) => v.barcode === "CC0001").stock_qty === 9,
     envR2c.call("getCatalog", {}, CCT).data.variants.find((v) => v.barcode === "CC0001").stock_qty);
 // a salesperson still never sees cost prices, even though the kept copy holds them
-envR2c.call("saveUser", { name: "Cache Salesman", email: "cs@x.in", role: "salesperson", password: "secret9" }, CCT);
-const CST = envR2c.call("login", { email: "cs@x.in", password: "secret9" }).data.token;
+envR2c.call("saveUser", { name: "Cache Salesman", email: "cs@x.in", role: "salesperson", password: "shop-pass-9" }, CCT);
+const CST = envR2c.call("login", { email: "cs@x.in", password: "shop-pass-9" }).data.token;
 check("catalogue: cost stays hidden from a salesperson", envR2c.call("getCatalog", {}, CST).data.variants.every((v) => v.avg_cost === undefined));
 
 // ---- the role was renamed from "salesman" to "salesperson": nobody may be locked out by it ----
@@ -1341,11 +1352,11 @@ rnEnv.call("saveProduct", {
 const rnVid = rnEnv.call("getCatalog", {}, RNT).data.variants.find((v) => v.barcode === "ROLE001").id;
 
 // a staff row still stored the old way — exactly what every existing shop has until the sweep runs
-rnEnv.call("saveUser", { name: "Old Row", email: "oldrow@x.in", role: "salesperson", password: "secret5" }, RNT);
+rnEnv.call("saveUser", { name: "Old Row", email: "oldrow@x.in", role: "salesperson", password: "shop-pass-5" }, RNT);
 const rnOld = rnEnv.ctx.findBy_("Users", "email", "oldrow@x.in");
 rnOld.role = "salesman";
 rnEnv.ctx.updateRows_("Users", [rnOld]);
-const rnOldLogin = rnEnv.call("login", { email: "oldrow@x.in", password: "secret5" });
+const rnOldLogin = rnEnv.call("login", { email: "oldrow@x.in", password: "shop-pass-5" });
 check("old role name: can still log in", rnOldLogin.success, rnOldLogin.message);
 const OLDT = rnOldLogin.data.token;
 check("old role name: is reported as salesperson", rnOldLogin.data.user.role === "salesperson", rnOldLogin.data.user.role);
@@ -1358,7 +1369,7 @@ check("old role name: still sees only their own bills", rnEnv.call("listSales", 
 check("old role name: cost price still hidden", rnEnv.call("getCatalog", {}, OLDT).data.variants.every((v) => v.avg_cost === undefined));
 
 // an app that has not updated yet still sends the old word when saving staff
-const rnLegacySave = rnEnv.call("saveUser", { name: "Legacy App", email: "legacy@x.in", role: "salesman", password: "secret6" }, RNT);
+const rnLegacySave = rnEnv.call("saveUser", { name: "Legacy App", email: "legacy@x.in", role: "salesman", password: "shop-pass-6" }, RNT);
 check("an app sending the old role name still saves", rnLegacySave.success, rnLegacySave.message);
 check("...and it is stored under the new name", rnEnv.ctx.findBy_("Users", "email", "legacy@x.in").role === "salesperson",
     rnEnv.ctx.findBy_("Users", "email", "legacy@x.in").role);
@@ -1371,10 +1382,10 @@ check("a second sweep finds nothing left to do", rnEnv.ctx.migrateRoleNames_() =
 check("the swept account still works", rnEnv.call("listSales", {}, OLDT).success);
 
 // the owner and managers are untouched by any of this
-rnEnv.call("saveUser", { name: "Mgr", email: "mgr-rn@x.in", role: "manager", password: "secret7" }, RNT);
-const MGRT = rnEnv.call("login", { email: "mgr-rn@x.in", password: "secret7" }).data.token;
+rnEnv.call("saveUser", { name: "Mgr", email: "mgr-rn@x.in", role: "manager", password: "shop-pass-7" }, RNT);
+const MGRT = rnEnv.call("login", { email: "mgr-rn@x.in", password: "shop-pass-7" }).data.token;
 check("a manager still has manager rights", rnEnv.call("stockIn", { lines: [{ variant_id: rnVid, qty: 1, unit_cost: 40 }] }, MGRT).success);
-check("an unknown role is still rejected", !rnEnv.call("saveUser", { name: "Nope", email: "nope@x.in", role: "wizard", password: "secret8" }, RNT).success);
+check("an unknown role is still rejected", !rnEnv.call("saveUser", { name: "Nope", email: "nope@x.in", role: "wizard", password: "shop-pass-8" }, RNT).success);
 
 // ---- backups: a copy of the sheet and the invoices, in Back_up ----
 // (own env: the Drive tree is inspected directly, and bills are backdated into two months)
@@ -1766,10 +1777,10 @@ owEnv.call("saveProduct", {
     variants: [{ size_label: "5ml", mrp: 100, sell_price: 100, cost: 40, opening_stock: 50, barcode: "OW1" }],
 }, OWT0);
 const owVid = owEnv.call("getCatalog", {}, OWT0).data.variants.find((v) => v.barcode === "OW1").id;
-owEnv.call("saveUser", { name: "Mgr Owner Test", email: "mgr-ow@x.in", role: "manager", password: "secret1" }, OWT0);
-owEnv.call("saveUser", { name: "Sp Owner Test", email: "sp-ow@x.in", role: "salesperson", password: "secret2" }, OWT0);
-const OWM = owEnv.call("login", { email: "mgr-ow@x.in", password: "secret1" }).data.token;
-const OWS = owEnv.call("login", { email: "sp-ow@x.in", password: "secret2" }).data.token;
+owEnv.call("saveUser", { name: "Mgr Owner Test", email: "mgr-ow@x.in", role: "manager", password: "shop-pass-1" }, OWT0);
+owEnv.call("saveUser", { name: "Sp Owner Test", email: "sp-ow@x.in", role: "salesperson", password: "shop-pass-2" }, OWT0);
+const OWM = owEnv.call("login", { email: "mgr-ow@x.in", password: "shop-pass-1" }).data.token;
+const OWS = owEnv.call("login", { email: "sp-ow@x.in", password: "shop-pass-2" }).data.token;
 
 // put the owner's row back to the word it was stored under before this rename
 const owRow = owEnv.ctx.findBy_("Users", "email", "owner@groovy.test");
@@ -1812,11 +1823,11 @@ check("...and it is addressed to them", /owner@groovy\.test/.test(owEnv.mails[ow
 check("the nightly job can still find an owner to run as", !!owEnv.ctx.rows_("Users").find((u) => owEnv.ctx.roleName_(u.role) === "owner"));
 
 // an app that has not updated yet still saves an Admin, stored under the new name
-const owLegacy = owEnv.call("saveUser", { name: "Legacy Owner", email: "legacy-ow@x.in", role: "ad" + "min", password: "secret3" }, OWT);
+const owLegacy = owEnv.call("saveUser", { name: "Legacy Owner", email: "legacy-ow@x.in", role: "ad" + "min", password: "shop-pass-3" }, OWT);
 check("an app sending the old role name still saves", owLegacy.success, owLegacy.message);
 check("...and it is stored as owner", owEnv.ctx.findBy_("Users", "email", "legacy-ow@x.in").role === "owner",
     owEnv.ctx.findBy_("Users", "email", "legacy-ow@x.in").role);
-check("the new account has the owner's powers", owEnv.call("listUsers", {}, owEnv.call("login", { email: "legacy-ow@x.in", password: "secret3" }).data.token).success);
+check("the new account has the owner's powers", owEnv.call("listUsers", {}, owEnv.call("login", { email: "legacy-ow@x.in", password: "shop-pass-3" }).data.token).success);
 
 // the sweep rewrites what is left, both old words, and is safe to run twice
 check("rows still holding an old role name are swept", owEnv.ctx.migrateRoleNames_() >= 1);
@@ -1824,7 +1835,7 @@ check("no old role name is left in the sheet", owEnv.ctx.rows_("Users").every((u
     owEnv.ctx.rows_("Users").map((u) => u.role));
 check("a second sweep finds nothing to do", owEnv.ctx.migrateRoleNames_() === 0);
 check("the swept owner still has every power", owEnv.call("listUsers", {}, OWT).success && owEnv.call("listLogs", {}, OWT).success);
-check("an unknown role is still rejected", !owEnv.call("saveUser", { name: "Nope", email: "nope-ow@x.in", role: "boss", password: "secret4" }, OWT).success);
+check("an unknown role is still rejected", !owEnv.call("saveUser", { name: "Nope", email: "nope-ow@x.in", role: "boss", password: "shop-pass-4" }, OWT).success);
 
 // ---- a salesperson may take returns, but only up to salesperson_max_return ----
 const capEnv = createEnv();
@@ -1837,10 +1848,10 @@ capEnv.call("saveProduct", {
     variants: [{ size_label: "50ml", mrp: 1000, sell_price: 1000, cost: 400, opening_stock: 90, barcode: "CAP1" }],
 }, CAPT);
 const capVid = capEnv.call("getCatalog", {}, CAPT).data.variants.find((v) => v.barcode === "CAP1").id;
-capEnv.call("saveUser", { name: "Cap Sp", email: "cap-sp@x.in", role: "salesperson", password: "secret1" }, CAPT);
-capEnv.call("saveUser", { name: "Cap Mgr", email: "cap-mgr@x.in", role: "manager", password: "secret2" }, CAPT);
-const CAPSP = capEnv.call("login", { email: "cap-sp@x.in", password: "secret1" }).data.token;
-const CAPMG = capEnv.call("login", { email: "cap-mgr@x.in", password: "secret2" }).data.token;
+capEnv.call("saveUser", { name: "Cap Sp", email: "cap-sp@x.in", role: "salesperson", password: "shop-pass-1" }, CAPT);
+capEnv.call("saveUser", { name: "Cap Mgr", email: "cap-mgr@x.in", role: "manager", password: "shop-pass-2" }, CAPT);
+const CAPSP = capEnv.call("login", { email: "cap-sp@x.in", password: "shop-pass-1" }).data.token;
+const CAPMG = capEnv.call("login", { email: "cap-mgr@x.in", password: "shop-pass-2" }).data.token;
 
 // ₹1,000 a piece, so the rupees in these checks are the quantities
 const capBill = (ref, qty, extra, token, branch) =>
@@ -1940,10 +1951,10 @@ const XB = xMake("Xchg B", "XB", 1000);
 const XDEAR = xMake("Xchg Dear", "XD", 1600);
 const XCHEAP = xMake("Xchg Cheap", "XC", 600);
 const XLAST = xMake("Xchg Last One", "XL", 1000, 1);
-xEnv.call("saveUser", { name: "Xchg Sp", email: "x-sp@x.in", role: "salesperson", password: "secret1" }, XT);
-xEnv.call("saveUser", { name: "Xchg Mgr", email: "x-mgr@x.in", role: "manager", password: "secret2" }, XT);
-const XSP = xEnv.call("login", { email: "x-sp@x.in", password: "secret1" }).data.token;
-const XMG = xEnv.call("login", { email: "x-mgr@x.in", password: "secret2" }).data.token;
+xEnv.call("saveUser", { name: "Xchg Sp", email: "x-sp@x.in", role: "salesperson", password: "shop-pass-1" }, XT);
+xEnv.call("saveUser", { name: "Xchg Mgr", email: "x-mgr@x.in", role: "manager", password: "shop-pass-2" }, XT);
+const XSP = xEnv.call("login", { email: "x-sp@x.in", password: "shop-pass-1" }).data.token;
+const XMG = xEnv.call("login", { email: "x-mgr@x.in", password: "shop-pass-2" }).data.token;
 
 let xRef = 0;
 const xBill = (variant, qty, token) => xEnv.call("completeSale", {
@@ -2186,13 +2197,13 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     const exId = ok(mEnv.call("saveExpense", { amount: 7, title: "gone", category: "Other", method: "cash" }, MT, 1), "expense to delete").id;
     ok(mEnv.call("deleteExpense", { id: exId }, MT, 1), "delete expense");
     check("expense removed: not listed", !ok(mEnv.call("listExpenses", {}, MT, 1), "expenses").expenses.some((e) => e.id === exId));
-    const uid = ok(mEnv.call("saveUser", { name: "Temp", email: "temp.m@x.in", role: "salesperson", password: "secret1", branch_id: 1 }, MT, 1), "temp user").id;
-    const TT = ok(mEnv.call("login", { email: "temp.m@x.in", password: "secret1" }), "temp login").token;
+    const uid = ok(mEnv.call("saveUser", { name: "Temp", email: "temp.m@x.in", role: "salesperson", password: "shop-pass-1", branch_id: 1 }, MT, 1), "temp user").id;
+    const TT = ok(mEnv.call("login", { email: "temp.m@x.in", password: "shop-pass-1" }), "temp login").token;
     ok(mEnv.call("logout", {}, TT, 1), "temp logout");
     check("logout: the token no longer works", mEnv.call("me", {}, TT, 1).code === "AUTH_EXPIRED");
     ok(mEnv.call("deleteUser", { id: uid }, MT, 1), "delete user");
     check("user removed: not listed", !ok(mEnv.call("listUsers", {}, MT, 1), "users").some((u) => u.id === uid));
-    check("user removed: can't log in", !mEnv.call("login", { email: "temp.m@x.in", password: "secret1" }).success);
+    check("user removed: can't log in", !mEnv.call("login", { email: "temp.m@x.in", password: "shop-pass-1" }).success);
     const catId = ok(mEnv.call("saveCategory", { name: "Temp Cat", default_hsn: "3303", default_gst: 18 }, MT, 1), "temp category").id;
     ok(mEnv.call("deleteCategory", { id: catId }, MT, 1), "delete category");
     check("category removed: not in the catalogue", !mEnv.call("getCatalog", {}, MT, 1).data.categories.some((c) => c.id === catId));
@@ -2303,12 +2314,12 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     const stockAtM = (b) => oc("getCatalog", {}, b).data.variants.find((v) => v.id === MV).stock_qty;
 
     // Mo works at the first two branches, not the third
-    const moSaved = oc("saveUser", { name: "Mover Mo", email: "mover@x.in", role: "stock_mover", password: "secret1", branch_id: 1, branch_ids: [1, B2] });
+    const moSaved = oc("saveUser", { name: "Mover Mo", email: "mover@x.in", role: "stock_mover", password: "shop-pass-1", branch_id: 1, branch_ids: [1, B2] });
     check("the owner can add a stock mover", moSaved.success && moSaved.data.role === "stock_mover", moSaved);
-    check("an unknown role is still refused", !oc("saveUser", { name: "Nope", email: "nope-mv@x.in", role: "boss", password: "secret2" }).success);
-    const samId = oc("saveUser", { name: "Seller Sam", email: "sam-mv@x.in", role: "salesperson", password: "secret3", branch_id: 1 }).data.id;
-    const SAM = mEnv.call("login", { email: "sam-mv@x.in", password: "secret3" }).data.token;
-    const moLogin = mEnv.call("login", { email: "mover@x.in", password: "secret1" });
+    check("an unknown role is still refused", !oc("saveUser", { name: "Nope", email: "nope-mv@x.in", role: "boss", password: "shop-pass-2" }).success);
+    const samId = oc("saveUser", { name: "Seller Sam", email: "sam-mv@x.in", role: "salesperson", password: "shop-pass-3", branch_id: 1 }).data.id;
+    const SAM = mEnv.call("login", { email: "sam-mv@x.in", password: "shop-pass-3" }).data.token;
+    const moLogin = mEnv.call("login", { email: "mover@x.in", password: "shop-pass-1" });
     check("a stock mover can log in, and is reported as one", moLogin.success && moLogin.data.user.role === "stock_mover", moLogin);
     check("...limited to the branches ticked for them", moLogin.data.user.branch_ids.join() === [1, B2].join() && moLogin.data.user.home_branch_id === 1, moLogin.data.user);
     const MO = moLogin.data.token;
@@ -2381,6 +2392,141 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("...and can move stock", mEnv.call("listTransfers", {}, SAM, 1).success);
     oc("saveUser", { id: samId, name: "Seller Sam", email: "sam-mv@x.in", role: "salesperson", branch_id: 1 });
     check("made a salesperson again, they sell and cannot move stock", bill("mv-5", {}, SAM).success && mEnv.call("listTransfers", {}, SAM, 1).code === "FORBIDDEN");
+}
+
+// ---- who gets in: passwords, wrong tries, saved replies, forgot password ----
+// The app's address is public, so the login is the whole of the door.
+{
+    const sEnv = createEnv();
+    sEnv.ctx.setupSheets();
+    const sPwd = /Password: (\S+)/.exec(sEnv.alerts.pop())[1];
+    const shape = /^[a-z2-9]{4}-[a-z2-9]{4}-[a-z2-9]{4}$/;
+    check("Setup's owner password is twelve random characters, not groovy@ and four digits", shape.test(sPwd), sPwd);
+    const sc = (a, p, t, b, r) => sEnv.call(a, p, t, b, r);
+    const run = (code) => require("vm").runInContext(code, sEnv.ctx);
+    const oLogin = sc("login", { email: "owner@groovy.test", password: sPwd });
+    const OT = oLogin.data.token;
+    check("a good password is not flagged at login", oLogin.success && !("weak_password" in oLogin.data), Object.keys(oLogin.data));
+
+    // the rule, when a password is set
+    const farhan = (password, extra) => sc("saveUser", Object.assign({ name: "Farhan Shaikh", email: "farhan@x.in", phone: "98765 01234", role: "salesperson", password }, extra || {}), OT);
+    check("a password under 8 characters is refused", /at least 8 characters/.test(farhan("short7x").message));
+    [["12345678", "digits only"], ["password123", "a common password"], ["Admin123", "a common password, whatever the capitals"], ["groovy@4821", "the old Setup shape"],
+        ["aaaaaaaa", "one key held down"], ["farhan-2026", "their own name"], ["Shaikh#99x", "their surname"], ["9876501234", "their phone number"], ["x9876501234y", "their phone number inside it"]]
+        .forEach(([pw, what]) => check("refused as easy to guess: " + what, /harder to guess/.test(farhan(pw).message), farhan(pw).message));
+    const fRes = farhan("river-lamp-73");
+    check("a password that is none of those is accepted", fRes.success, fRes.message);
+    const fId = fRes.data.id;
+    const fLogin = (password) => sc("login", { email: "farhan@x.in", password });
+    let FT = fLogin("river-lamp-73").data.token;
+    check("changing your own password to an easy one is refused, with the reason", /harder to guess/.test(sc("changePassword", { current_password: "river-lamp-73", new_password: "farhan1234" }, FT).message));
+    check("...and to a good one is accepted", sc("changePassword", { current_password: "river-lamp-73", new_password: "candle-boat-88" }, FT).success);
+    check("the owner cannot give someone an easy one either", /harder to guess/.test(farhan("password1", { id: fId }).message));
+
+    // a password from before the rule (written straight into the sheet) still works, and is pointed out
+    run('resetReqCache_(); (function () { const u = findBy_("Users", "email", "farhan@x.in"); u.salt = newSalt_(); u.pwd_hash = hashPwd_("groovy@4821", u.salt); updateRows_("Users", [u]); })()');
+    const oldLogin = fLogin("groovy@4821");
+    check("an existing weak password still logs in", oldLogin.success, oldLogin.message);
+    check("...and the app is told to ask for a better one", oldLogin.data.weak_password === true, Object.keys(oldLogin.data));
+
+    // wrong passwords: five, then ten minutes; twenty in six hours, then the rest of the six hours
+    const wrong = () => fLogin("wrong-guess-" + Math.random());
+    const mails0 = sEnv.mails.length;
+    const first5 = [1, 2, 3, 4, 5].map(wrong);
+    check("five wrong passwords are each just refused", first5.every((r) => r.message === "Invalid email or password"), first5.map((r) => r.message));
+    check("the sixth try is told to wait ten minutes", wrong().message === "Too many attempts. Try again in 10 minutes.");
+    check("...and so is the right password", fLogin("groovy@4821").message === "Too many attempts. Try again in 10 minutes.");
+    const alert1 = sEnv.mails[sEnv.mails.length - 1];
+    check("the owner is emailed once that a login was shut", sEnv.mails.length === mails0 + 1 && alert1.to === "owner@groovy.test" && /wrong passwords for Farhan Shaikh/.test(alert1.subject)
+        && /farhan@x\.in/.test(alert1.body) && /Nobody got in/.test(alert1.body), alert1 && [alert1.to, alert1.subject]);
+    check("someone already logged in is not affected", sc("getCatalog", {}, oldLogin.data.token, 1).success);
+    sEnv.expireCache(11 * 60); // ten minutes pass
+    check("after ten minutes the right password works again", fLogin("groovy@4821").success);
+    // a success wipes the count, so start again and keep going wrong: 5, wait, 5, wait…
+    for (let round = 0; round < 4; round++) {
+        [1, 2, 3, 4, 5].forEach(wrong);
+        sEnv.expireCache(11 * 60);
+    }
+    const shut = fLogin("groovy@4821");
+    check("twenty wrong in six hours: shut for the rest of them, right password or not", /Too many wrong passwords\. Ask the owner/.test(shut.message), shut.message);
+    check("...with no second email about the same account", sEnv.mails.length === mails0 + 1, sEnv.mails.length - mails0);
+    check("the owner giving a new password opens the login at once", farhan("meadow-kite-55", { id: fId }).success && fLogin("meadow-kite-55").success);
+    [1, 2, 3, 4, 5].forEach(wrong);
+    check("(shut again)", /Too many attempts/.test(fLogin("meadow-kite-55").message));
+    const menuPwd = sEnv.ctx.resetStaffPassword_("farhan@x.in").password;
+    check("the Sheet's own reset opens it too, with a random password", shape.test(menuPwd) && fLogin(menuPwd).success, menuPwd);
+    const mails1 = sEnv.mails.length;
+    for (let i = 0; i < 7; i++) sc("login", { email: "nobody@x.in", password: "wrong-guess-" + i });
+    check("an address that is nobody's is limited the same way, with no email", sc("login", { email: "nobody@x.in", password: "x" }).message === "Too many attempts. Try again in 10 minutes." && sEnv.mails.length === mails1);
+    sEnv.expireCache(21600); // six hours pass: every count is gone
+    check("after six hours everything is as it was", fLogin(menuPwd).success && sc("login", { email: "owner@groovy.test", password: sPwd }).success);
+
+    // saved replies: worth nothing to anyone but the phone that asked
+    const cat = sc("bootstrap", {}, OT, 1).data.catalog.categories[0].id;
+    sc("saveProduct", { name: "Reply Tester", category_id: cat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: 500, sell_price: 450, cost: 200, opening_stock: 5, barcode: "RT1" }] }, OT, 1);
+    const sessions = () => run('resetReqCache_(); rows_("Sessions").filter((s) => s.token).length');
+    const s0 = sessions();
+    const L1 = sc("login", { email: "owner@groovy.test", password: sPwd }, undefined, undefined, "req-login-0001");
+    const L1again = sc("login", { email: "owner@groovy.test", password: sPwd }, undefined, undefined, "req-login-0001");
+    check("a login whose reply was lost: the retry gets the same answer and logs in once, as before", L1.success && JSON.stringify(L1again) === JSON.stringify(L1) && sessions() === s0 + 1, { added: sessions() - s0 });
+    const L2 = sc("login", { email: "owner@groovy.test", password: "not-the-password" }, undefined, undefined, "req-login-0001");
+    check("the same request id with a wrong password gets nothing of it", !L2.success && !L2.data && L2.message === "Invalid email or password", L2);
+    check("...nor does the id alone, sent as some other request", sc("getCatalog", {}, undefined, 1, "req-login-0001").code === "AUTH_EXPIRED" && sc("me", {}, "x".repeat(60), 1, "req-login-0001").code === "AUTH_EXPIRED");
+    const loginKeys = [...sEnv.cache.keys()].filter((k) => k.indexOf("req-login-0001") >= 0);
+    check("...the saved reply is filed under what was sent, not under the id alone", loginKeys.length === 1 && loginKeys[0].length === "rq_req-login-0001_".length + 24, loginKeys);
+    sc("login", { email: "owner@groovy.test", password: sPwd }); // (clears the count the wrong password left)
+    FT = fLogin(menuPwd).data.token;
+    const mine = sc("getCatalog", {}, OT, 1, "req-sec-0001");
+    check("(the owner's saved reply holds cost prices)", mine.success && mine.data.variants.some((v) => v.avg_cost === 200));
+    const noToken = sc("getCatalog", {}, undefined, 1, "req-sec-0001");
+    check("the same request id with no login is asked to log in", noToken.code === "AUTH_EXPIRED" && !noToken.data, noToken.code);
+    const others = sc("getCatalog", {}, FT, 1, "req-sec-0001");
+    check("the same request id from another session gets that session's own answer, not the owner's", others.success && others.data.variants.every((v) => v.avg_cost === undefined), others.data && Object.keys(others.data.variants[0]));
+    sc("adjustStock", { variant_id: mine.data.variants.find((v) => v.barcode === "RT1").id, mode: "add", qty: 1, reason: "other" }, OT, 1);
+    const again = sc("getCatalog", {}, OT, 1, "req-sec-0001");
+    check("the session that asked still gets its saved reply on a retry", JSON.stringify(again) === JSON.stringify(mine));
+
+    // forgot password, switched on: an 8-digit code that is thrown away after five wrong tries
+    sc("saveSettings", { settings: { forgot_password: "yes" } }, OT);
+    const ask = () => { sEnv.cache.delete("otp_sent_farhan@x.in"); return sc("forgotPassword", { email: "farhan@x.in" }); }; // skip the minute between requests
+    const codeIn = () => /code is: (\d{8})\n/.exec(sEnv.mails[sEnv.mails.length - 1].body)[1];
+    ask();
+    const code1 = codeIn();
+    const guess = code1 === "00000000" ? "11111111" : "00000000";
+    const reset = (otp, password) => sc("resetPassword", { email: "farhan@x.in", otp, password });
+    const five = [1, 2, 3, 4, 5].map(() => reset(guess, "orchid-train-61"));
+    check("five wrong codes are each refused", five.every((r) => r.message === "Invalid or expired code"), five.map((r) => r.message));
+    check("...and then the code itself is gone from the sheet", run('resetReqCache_(); (findBy_("Users", "email", "farhan@x.in").otp || "") === ""'));
+    check("...so the right code no longer works", !reset(code1, "orchid-train-61").success);
+    ask();
+    const code2 = codeIn();
+    check("a new code is a different email, with its own five tries", code2.length === 8 && reset(code1 === code2 ? guess : code1, "orchid-train-61").message === "Invalid or expired code");
+    check("the right code with an easy password is refused for the password", /harder to guess/.test(reset(code2, "farhan@2026").message));
+    [1, 2, 3, 4, 5].forEach(wrong);
+    check("(login shut by wrong passwords)", /Too many attempts/.test(fLogin(menuPwd).message));
+    const okReset = sc("resetPassword", { email: "farhan@x.in", otp: code2, password: "orchid-train-61" }, undefined, undefined, "req-reset-0001");
+    check("...and still works with a good one", okReset.success, okReset.message);
+    const okAgain = sc("resetPassword", { email: "farhan@x.in", otp: code2, password: "orchid-train-61" }, undefined, undefined, "req-reset-0001");
+    check("a reset whose reply was lost: the retry is told it worked, not 'invalid code'", JSON.stringify(okAgain) === JSON.stringify(okReset), okAgain.message);
+    check("a reset by code opens the login at once, and ends the old sessions", fLogin("orchid-train-61").success && sc("getCatalog", {}, FT, 1).code === "AUTH_EXPIRED");
+    check("the code cannot be used twice", !reset(code2, "another-good-77").success);
+    sEnv.cache.delete("otp_sent_farhan@x.in");
+    const mailsF = sEnv.mails.length;
+    const fr1 = sc("forgotPassword", { email: "farhan@x.in" }, undefined, undefined, "req-forgot-0001");
+    const fr2 = sc("forgotPassword", { email: "farhan@x.in" }, undefined, undefined, "req-forgot-0001");
+    check("a code request whose reply was lost: the retry gets the same answer and sends one email", fr1.success && JSON.stringify(fr2) === JSON.stringify(fr1) && sEnv.mails.length === mailsF + 1, { fr2: fr2.message, mails: sEnv.mails.length - mailsF });
+
+    // demo data: its staff get a password nobody can read in the code
+    const dEnv = createEnv();
+    dEnv.ctx.setupSheets();
+    dEnv.alerts.pop();
+    dEnv.ctx.seedDemo();
+    const dMsg = dEnv.alerts.pop();
+    const dPwd = (/password ([a-z2-9-]+)\)/.exec(dMsg) || [])[1];
+    check("demo staff get a random password, shown once", shape.test(dPwd || ""), dMsg);
+    check("...the old published one does not work", !dEnv.call("login", { email: "manager@demo.local", password: "demo" + "1234" }).success);
+    check("...the shown one does, and it is not flagged", dEnv.call("login", { email: "manager@demo.local", password: dPwd }).success && !dEnv.call("login", { email: "sameer@demo.local", password: dPwd }).data.weak_password);
+    check("the message says to delete the demo staff before going live", /Delete them in More → Staff/.test(dMsg));
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

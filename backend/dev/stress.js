@@ -1,7 +1,7 @@
 /**
  * Multi-user stress test against a SEPARATE TEST COPY of the shop (never the live one).
  *
- *   node backend/dev/stress.js <test web-app URL> --minutes 10 --branches 3 --out <dir>
+ *   node backend/dev/stress.js <test web-app URL> --owner <email> --password <password> --minutes 10 --branches 3 --out <dir>
  *
  * At every branch, two salespeople, a manager and an admin (owner role) work at the same time — 12 people
  * across 3 branches — plus deliberate collisions: the same sale sent twice, the same request retried,
@@ -9,28 +9,32 @@
  * other at once. Every request and reply is logged; at the end the harness reads the shop back and checks
  * it. Stock and the raw tables are then checked from an .xlsx download of the copy (stress-check.js).
  *
- * Refuses to run unless the server's shop name is "STRESS TEST COPY", and never talks to the live URL.
+ * Refuses to run unless the server's shop name is "STRESS TEST COPY"; with --live <id> the live shop's
+ * address is refused outright as well.
  * `--dry` allows a local mock (backend/dev/server.js) to try the harness itself. Dev-only.
  */
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const LIVE = "AKfycbwPlo-URdlZ5k4y1HKwUK5UDKyMgUfFHNCw7Nl2eMp7bqXmjQpq6dz6xTLMc61We53w"; // the live shop: forbidden
 const args = process.argv.slice(2);
 const URL = args[0];
 const opt = (k, d) => (args.includes(k) ? args[args.indexOf(k) + 1] : d);
 const MINUTES = Number(opt("--minutes", 10));
 const NBRANCH = Number(opt("--branches", 3));
 const OUT = opt("--out", path.join(process.cwd(), "stress-out"));
-const OWNER = { email: opt("--owner", "groovy.pos@gmail.com"), password: opt("--password", "admin123") };
+// the test copy's owner login is given on the command line: this file is public, and a login written
+// in it is a login anyone can read
+const OWNER = { email: opt("--owner", ""), password: opt("--password", "") };
+if (!OWNER.email || !OWNER.password) throw new Error("give the test copy's owner login: --owner <email> --password <password>");
+const LIVE = opt("--live", ""); // optional: the live shop's web-app id, to have it refused outright
 const DRY = args.includes("--dry");
 // --pace 30-90: each person waits 30–90 s between actions (a busy counter) instead of going non-stop
 const PACE = (opt("--pace", "") || "").split("-").map(Number).filter((x) => x > 0);
 const think = () => (PACE.length ? new Promise((r) => setTimeout(r, 1000 * (PACE[0] + Math.random() * ((PACE[1] || PACE[0]) - PACE[0])))) : null);
 if (!URL || !(/^https:\/\/script\.google\.com\/macros\/s\/[\w-]+\/exec$/.test(URL) || (DRY && /^http:\/\/localhost:\d+$/.test(URL))))
     throw new Error("give the TEST web-app URL (…/exec)");
-if (URL.includes(LIVE)) throw new Error("That is the LIVE shop. The stress test only runs on a test copy.");
+if (LIVE && URL.includes(LIVE)) throw new Error("That is the LIVE shop. The stress test only runs on a test copy.");
 fs.mkdirSync(OUT, { recursive: true });
 const logFile = path.join(OUT, "requests.jsonl");
 fs.writeFileSync(logFile, "");
@@ -99,10 +103,10 @@ async function call(who, action, payload, token, branch, reqId) {
     const stamp = Date.now().toString(36);
     const mkUser = async (name, role, b) => {
         const email = `stress.${name.toLowerCase().replace(/\W/g, "")}.${stamp}@example.com`;
-        const s = await call("owner", "saveUser", { name: "Stress " + name, email, role, password: "stress123", branch_id: b.id, branch_ids: role === "owner" ? [] : [b.id] }, T, b.id);
+        const s = await call("owner", "saveUser", { name: "Stress " + name, email, role, password: "bulk-load-pass-9", branch_id: b.id, branch_ids: role === "owner" ? [] : [b.id] }, T, b.id);
         if (!s.success) throw new Error("create user failed: " + s.message);
         let l;
-        for (let i = 0; i < 5; i++) { l = await call(name, "login", { email, password: "stress123", device: "stress test" }); if (l.success && l.data && l.data.token) break; await sleep(2000); }
+        for (let i = 0; i < 5; i++) { l = await call(name, "login", { email, password: "bulk-load-pass-9", device: "stress test" }); if (l.success && l.data && l.data.token) break; await sleep(2000); }
         if (!l.success || !l.data || !l.data.token) throw new Error("login failed for " + name + ": " + (l.message || l.err));
         return { name, role, email, id: s.data.id, token: l.data.token, branch: b.id };
     };
@@ -154,10 +158,12 @@ async function call(who, action, payload, token, branch, reqId) {
             else if (x < 0.76) { const id = mine.shift(); if (id) tally("deleteHeld:" + (await call(u.name, "deleteHeld", { id }, u.token, team.b.id)).success); }
             else if (x < 0.8) { const id = mine.shift(); if (id) tally("saleFromHeld:" + (await sale(u, team, { held_id: id })).success); }
             else if (x < 0.83) { // log out and in again (a session row is emptied, another written)
+                u.relogin = true; // their old login is dead until the new one arrives: the collisions below wait for it
                 await call(u.name, "logout", {}, u.token, team.b.id);
                 let l; // like a person: try again until the login goes through
-                for (let i = 0; i < 10; i++) { l = await call(u.name, "login", { email: u.email, password: "stress123", device: "stress test" }); if (l.success) break; await sleep(2000 + rnd(3000)); }
+                for (let i = 0; i < 10; i++) { l = await call(u.name, "login", { email: u.email, password: "bulk-load-pass-9", device: "stress test" }); if (l.success) break; await sleep(2000 + rnd(3000)); }
                 if (l.success) u.token = l.data.token;
+                u.relogin = false;
                 tally("relogin:" + l.success);
                 tally("relogin tries:" + (l.success ? "ok" : "gave up"));
             }
@@ -199,25 +205,29 @@ async function call(who, action, payload, token, branch, reqId) {
     const at = (f) => sleep(MINUTES * 60000 * f);
     const outcome = (r) => ({ ok: r.success, id: r.data && r.data.sale && r.data.sale.id, msg: r.message || r.err });
     const busyOnly = (rs) => rs.every((r) => !r.success && /busy|still saving/i.test(r.message || ""));
-    const until = async (make) => { for (let i = 0; i < 8; i++) { const rs = await make(); if (!busyOnly(rs)) return rs; await sleep(3000 + rnd(5000)); } return make(); };
+    // A collision borrows people's logins while their own loops are running, and a loop may be in the
+    // middle of logging out and in again. Sent then, the request is refused as "session expired", which
+    // says nothing about the collision. So wait until none of the people involved is between logins.
+    const steady = async (...us) => { for (let i = 0; i < 400 && us.some((u) => u.relogin); i++) await sleep(25); };
+    const until = async (make, ...us) => { for (let i = 0; i < 8; i++) { await steady(...us); const rs = await make(); if (!busyOnly(rs)) return rs; await sleep(3000 + rnd(5000)); } await steady(...us); return make(); };
     const collide = async () => {
         await at(0.2);
         { const ls = lines(); await restock(A, ls); // the same sale from two phones at once
           const same = { client_ref: crypto.randomUUID(), lines: ls, payments: [{ method: "cash", amount: 999999 }] };
-          const rs = await until(() => Promise.all([call(A.sp1.name, "completeSale", same, A.sp1.token, A.b.id), call(A.sp2.name, "completeSale", same, A.sp2.token, A.b.id)]));
+          const rs = await until(() => Promise.all([call(A.sp1.name, "completeSale", same, A.sp1.token, A.b.id), call(A.sp2.name, "completeSale", same, A.sp2.token, A.b.id)]), A.sp1, A.sp2);
           collisions.push({ kind: "same sale twice", client_ref: same.client_ref, results: rs.map(outcome) }); }
         { const ls = lines(); await restock(A, ls); // the same request retried
           const p = { client_ref: crypto.randomUUID(), lines: ls, payments: [{ method: "cash", amount: 999999 }] };
-          const rs = await until(() => { const rid = crypto.randomUUID(); return Promise.all([call(A.sp1.name, "completeSale", p, A.sp1.token, A.b.id, rid), call(A.sp1.name, "completeSale", p, A.sp1.token, A.b.id, rid)]); });
+          const rs = await until(() => { const rid = crypto.randomUUID(); return Promise.all([call(A.sp1.name, "completeSale", p, A.sp1.token, A.b.id, rid), call(A.sp1.name, "completeSale", p, A.sp1.token, A.b.id, rid)]); }, A.sp1);
           collisions.push({ kind: "same request twice", client_ref: p.client_ref, results: rs.map(outcome) }); }
         await at(0.2);
-        { const v = await sale(A.sp2, A); // two voids of one bill (manager and admin)
+        { await steady(A.sp2); const v = await sale(A.sp2, A); // two voids of one bill (manager and admin)
           if (v.success) { const rs = await until(() => Promise.all([call(A.mg.name, "voidSale", { id: v.data.sale.id, reason: "race" }, A.mg.token, A.b.id), call(A.ad.name, "voidSale", { id: v.data.sale.id, reason: "race" }, A.ad.token, A.b.id)]));
             collisions.push({ kind: "two voids of one bill", sale_id: v.data.sale.id, results: rs.map(outcome) }); } }
         await at(0.2);
         { const set = await call(A.mg.name, "adjustStock", { variant_id: lastUnitItem.id, mode: "set", qty: 1, reason: "count" }, A.mg.token, A.b.id); // two sales of the last unit
           if (set.success) { const one = (u) => call(u.name, "completeSale", { client_ref: crypto.randomUUID(), lines: [{ variant_id: lastUnitItem.id, qty: 1 }], payments: [{ method: "cash", amount: 999999 }] }, u.token, A.b.id);
-            const rs = await until(() => Promise.all([one(A.sp1), one(A.sp2)]));
+            const rs = await until(() => Promise.all([one(A.sp1), one(A.sp2)]), A.sp1, A.sp2);
             collisions.push({ kind: "two sales of the last unit", variant_id: lastUnitItem.id, results: rs.map(outcome) });
             rs.forEach((r) => r.success && bills.push({ id: r.data.sale.id, by: "race", branch: A.b.id, items: r.data.items })); } }
         await at(0.2);
