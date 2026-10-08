@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
-import { Users, Phone, MessageCircle, Plus, Pencil } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Users, Phone, MessageCircle, Plus, Pencil, UserPlus, Check } from "lucide-react";
 import { useApp } from "../store";
 import { api } from "../lib/api";
+import { addToContacts, wasAdded } from "../lib/contacts";
 import { useCachedFetch } from "../lib/cached";
 import { runBusy } from "../lib/busy";
 import { navigate } from "../lib/router";
@@ -76,7 +77,10 @@ export default function Customers() {
 }
 
 function CustomerSheet({ c, onClose, onEdit }) {
+  const { isManager, toast } = useApp();
   const [h, setH] = useState(null);
+  const [tapped, setTapped] = useState(""); // the number just handed over, in case the phone can't keep a note of it
+  const noted = useMemo(() => isManager && !!c && wasAdded(c.phone), [isManager, c]);
   useEffect(() => {
     setH(null);
     if (c && c.id)
@@ -85,6 +89,14 @@ function CustomerSheet({ c, onClose, onEdit }) {
         .catch(() => setH({ sales: [] }));
   }, [c]);
   if (!c) return null;
+  const inContacts = noted || tapped === c.phone;
+  const add = async () => {
+    try {
+      if (await addToContacts(c)) setTapped(c.phone);
+    } catch (e) {
+      toast(e.message, "error");
+    }
+  };
   return (
     <Sheet open onClose={onClose} title={c.name || c.phone}>
       <div className="grid-3">
@@ -112,6 +124,11 @@ function CustomerSheet({ c, onClose, onEdit }) {
           <Pencil size={16} /> Edit
         </button>
       </div>
+      {isManager && (
+        <button className="btn secondary small block mt" onClick={add}>
+          {inContacts ? <Check size={16} /> : <UserPlus size={16} />} {inContacts ? "Added to contacts" : "Add to contacts"}
+        </button>
+      )}
       {c.gstin && <div className="small muted mt">GSTIN: {c.gstin}</div>}
       <div className="section-label">Purchase history</div>
       {!h ? (

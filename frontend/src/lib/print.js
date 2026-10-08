@@ -237,8 +237,8 @@ export function a4InvoiceHtml(d, s) {
 // An iPhone/iPad *browser tab* (every browser there is Apple's WebKit, Chrome too) ignores printing a
 // hidden frame and prints the app screen instead, so there the bill opens as a page of its own and prints
 // itself. The installed app, Android and computers keep the hidden frame, which prints the bill there.
-const isInstalledApp = () => window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
-const isIPhoneOrIPad = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+export const isInstalledApp = () => window.matchMedia?.("(display-mode: standalone)").matches || navigator.standalone === true;
+export const isIPhoneOrIPad = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
 
 export function printHtml(html) {
   if (isIPhoneOrIPad() && !isInstalledApp() && printInNewTab(html)) return;

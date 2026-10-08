@@ -162,6 +162,7 @@ The app prints an **80 mm receipt** or an **A4 tax invoice** using the phone's o
 **Daily use**
 
 - **Sell:** scan or tap items, then **View bill → Checkout**. Enter the customer's mobile number (optional), choose Cash, UPI or Card (tap **Split payment** to combine them), then tap **Complete**. Share the bill on WhatsApp or print it.
+- **Customers:** go to **More → Customers** and tap a customer to call them, chat on WhatsApp or see their bills. The owner and managers also get **Add to contacts**: it hands the name and number to the phone, and the phone's Contacts app asks you to save (on an iPhone, choose **Contacts** in the share sheet that opens). Once tapped it reads **Added to contacts** on that phone.
 - **End of day:** go to **More → Reports → Day close**. It shows the cash you should have in the drawer and a breakdown by salesperson.
 
 ## Branches (more than one shop)
