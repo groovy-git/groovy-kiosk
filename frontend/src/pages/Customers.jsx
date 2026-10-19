@@ -12,7 +12,7 @@ import { Avatar, Button, Empty, Field, SearchBar, Sheet, SkeletonList } from "..
 import { STATUS } from "./Sales";
 
 export default function Customers() {
-  const { toast } = useApp();
+  const { toast, isAdmin } = useApp();
   const [typed, setTyped] = useState("");
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(null);
@@ -35,7 +35,7 @@ export default function Customers() {
     <>
       <TopBar title="Customers" back="more" right={loading && list ? <Updating /> : null} />
       <div className="page">
-        <SearchBar value={typed} onChange={setTyped} placeholder="Name or mobile number" />
+        <SearchBar value={typed} onChange={setTyped} placeholder={isAdmin ? "Name or mobile number" : "Name or full mobile number"} />
         {!list ? (
           <div className="mt">
             <SkeletonList />
@@ -59,9 +59,11 @@ export default function Customers() {
           </div>
         )}
       </div>
-      <button className="fab" onClick={() => setEdit({ name: "", phone: "", gstin: "" })}>
-        <Plus size={20} /> Customer
-      </button>
+      {isAdmin && (
+        <button className="fab" onClick={() => setEdit({ name: "", phone: "", gstin: "" })}>
+          <Plus size={20} /> Customer
+        </button>
+      )}
       <CustomerSheet c={open} onClose={() => setOpen(null)} onEdit={(c) => setEdit(c)} />
       <EditSheet
         c={edit}
@@ -77,10 +79,10 @@ export default function Customers() {
 }
 
 function CustomerSheet({ c, onClose, onEdit }) {
-  const { isManager, toast } = useApp();
+  const { isAdmin, toast } = useApp();
   const [h, setH] = useState(null);
   const [tapped, setTapped] = useState(""); // the number just handed over, in case the phone can't keep a note of it
-  const noted = useMemo(() => isManager && !!c && wasAdded(c.phone), [isManager, c]);
+  const noted = useMemo(() => isAdmin && !!c && wasAdded(c.phone), [isAdmin, c]);
   useEffect(() => {
     setH(null);
     if (c && c.id)
@@ -113,21 +115,24 @@ function CustomerSheet({ c, onClose, onEdit }) {
           <div className="value" style={{ fontSize: 17 }}>{inr(c.bills ? Math.round(c.total_spent / c.bills) : 0)}</div>
         </div>
       </div>
-      <div className="grid-3 mt">
-        <a className="btn secondary small" href={`tel:+91${c.phone}`}>
-          <Phone size={16} /> Call
-        </a>
-        <a className="btn wa small" href={`https://wa.me/91${c.phone}`} target="_blank" rel="noreferrer">
-          <MessageCircle size={16} /> Chat
-        </a>
-        <button className="btn secondary small" onClick={() => onEdit(c)}>
-          <Pencil size={16} /> Edit
-        </button>
-      </div>
-      {isManager && (
-        <button className="btn secondary small block mt" onClick={add}>
-          {inContacts ? <Check size={16} /> : <UserPlus size={16} />} {inContacts ? "Added to contacts" : "Add to contacts"}
-        </button>
+      {/* calling, messaging, editing and saving a customer are the owner's: no one else is sent the number */}
+      {isAdmin && (
+        <>
+          <div className="grid-3 mt">
+            <a className="btn secondary small" href={`tel:+91${c.phone}`}>
+              <Phone size={16} /> Call
+            </a>
+            <a className="btn wa small" href={`https://wa.me/91${c.phone}`} target="_blank" rel="noreferrer">
+              <MessageCircle size={16} /> Chat
+            </a>
+            <button className="btn secondary small" onClick={() => onEdit(c)}>
+              <Pencil size={16} /> Edit
+            </button>
+          </div>
+          <button className="btn secondary small block mt" onClick={add}>
+            {inContacts ? <Check size={16} /> : <UserPlus size={16} />} {inContacts ? "Added to contacts" : "Add to contacts"}
+          </button>
+        </>
       )}
       {c.gstin && <div className="small muted mt">GSTIN: {c.gstin}</div>}
       <div className="section-label">Purchase history</div>

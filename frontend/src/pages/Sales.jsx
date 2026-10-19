@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Receipt, ChevronRight } from "lucide-react";
 import { useApp } from "../store";
 import { api } from "../lib/api";
 import { useCachedFetch } from "../lib/cached";
 import { navigate } from "../lib/router";
-import { inr, istDate, monthStart, fmtTime, relDay, METHOD_LABEL } from "../lib/format";
+import { inr, istDate, monthStart, fmtTime, relDay, METHOD_LABEL, wholePhone } from "../lib/format";
 import TopBar, { Updating } from "../components/TopBar";
 import { Chips, DateField, Empty, SearchBar, SkeletonList } from "../components/ui";
 
@@ -24,7 +24,7 @@ export const STATUS = {
 };
 
 export default function Sales() {
-  const { isManager, sellers, toast, multiBranch, isAllBranches, role } = useApp();
+  const { isManager, isAdmin, sellers, toast, multiBranch, isAllBranches, role } = useApp();
   const saved = JSON.parse(sessionStorage.getItem("gp_sales_filter") || "null") || { preset: "today", from: istDate(), to: istDate(), seller: "" };
   const [f, setF] = useState(saved);
   const [q, setQ] = useState("");
@@ -46,11 +46,32 @@ export default function Sales() {
     (e) => toast(e.message, "error"),
   );
 
+  // numbers here are masked for anyone but the owner, so a whole number typed by them is looked up on the
+  // server, which matches it exactly; the list then shows just those bills
+  const number = isAdmin ? "" : wholePhone(q);
+  const [byNumber, setByNumber] = useState(null);
+  useEffect(() => {
+    setByNumber(null);
+    if (!number) return;
+    let live = true;
+    api("listSales", { from, to, salesman_id: f.seller || undefined, q: number })
+      .then((r) => live && setByNumber(new Set(r.data.sales.map((s) => s.id))))
+      .catch((e) => {
+        if (!live) return;
+        setByNumber(new Set());
+        toast(e.message, "error");
+      });
+    return () => {
+      live = false;
+    };
+  }, [number, from, to, f.seller]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const list = useMemo(() => {
     if (!data) return [];
+    if (number) return byNumber ? data.sales.filter((x) => byNumber.has(x.id)) : [];
     const s = q.trim().toLowerCase();
     return s ? data.sales.filter((x) => (x.invoice_no + " " + x.customer_name + " " + x.customer_phone + " " + x.salesman_name).toLowerCase().includes(s)) : data.sales;
-  }, [data, q]);
+  }, [data, q, number, byNumber]);
 
   const groups = useMemo(() => {
     const g = [];
@@ -108,7 +129,7 @@ export default function Sales() {
           </div>
         )}
 
-        {!data ? (
+        {!data || (number && !byNumber) ? (
           <div className="mt">
             <SkeletonList />
           </div>

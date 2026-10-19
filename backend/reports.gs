@@ -373,7 +373,7 @@ function reportRegister_(p, ctx) {
     const rows = sales
         .filter((s) => inRange_(s.date, from, to))
         .map((s) => ({
-            invoice_no: s.invoice_no, date: s.date, customer: s.customer_name || "Walk-in", phone: s.customer_phone,
+            invoice_no: s.invoice_no, date: s.date, customer: s.customer_name || "Walk-in", phone: phoneFor_(s.customer_phone, ctx),
             gstin: s.customer_gstin, salesperson: s.salesman_name, taxable: s.taxable, cgst: s.cgst, sgst: s.sgst,
             round_off: s.round_off, total: s.grand_total, refunded: s.refunded, status: s.status,
         }));

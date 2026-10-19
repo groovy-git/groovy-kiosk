@@ -4,7 +4,7 @@ import { useApp } from "../../store";
 import { api } from "../../lib/api";
 import { runBusy } from "../../lib/busy";
 import { newClientRef } from "../../lib/cart";
-import { inr, r2, METHOD_LABEL } from "../../lib/format";
+import { inr, r2, METHOD_LABEL, isMaskedPhone } from "../../lib/format";
 import { Button, Field, MoneyInput, Seg, Sheet, Spinner } from "../../components/ui";
 
 const METHODS = ["upi", "cash", "card"]; // UPI first: most customers pay that way
@@ -101,6 +101,9 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   }, [cust.phone]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const setCust = (patch) => setCart((c) => ({ ...c, customer: { ...c.customer, ...patch } }));
+  // a number carried from a bill (or a held bill) that this person only sees masked: kept whole, or
+  // swapped for another one; editing it a digit at a time would only break it
+  const maskedPhone = isMaskedPhone(cust.phone);
 
   const rows = useMemo(() => pays.map((p) => ({ ...p, amount: Number(p.amount) || 0 })), [pays]);
   const tendered = r2(rows.reduce((s, p) => s + p.amount, 0));
@@ -122,8 +125,10 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
     });
 
   const complete = async () => {
-    const phone = (cust.phone || "").replace(/\D/g, "");
-    if (phone && phone.length !== 10) return toast("Enter a 10-digit mobile number or leave it empty", "error");
+    // a masked number goes as it is, and the server takes the customer of the bill it came from
+    const masked = maskedPhone;
+    const phone = masked ? cust.phone : (cust.phone || "").replace(/\D/g, "");
+    if (phone && !masked && phone.length !== 10) return toast("Enter a 10-digit mobile number or leave it empty", "error");
     const ref = cart.client_ref || newClientRef();
     if (!cart.client_ref) setCart((c) => ({ ...c, client_ref: ref }));
     setBusy(true);
@@ -132,7 +137,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
         client_ref: ref,
         lines: cart.lines.filter((l) => catalog.byVariant.has(l.variant_id)).map((l) => ({ variant_id: l.variant_id, qty: l.qty, discount: l.discount || 0 })),
         bill_disc: cart.bill_disc || 0,
-        customer: { phone, name: (cust.name || "").trim(), gstin: showGstin ? (cust.gstin || "").trim().toUpperCase() : "" },
+        customer: { phone, name: (cust.name || "").trim(), gstin: showGstin ? (cust.gstin || "").trim().toUpperCase() : "", ...(masked ? { from_sale_id: cust.from_sale_id } : {}) },
         salesman_id: sellerId,
         payments: rows.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference })),
         notes: cart.notes || "",
@@ -159,7 +164,8 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
       });
       patchStock(patches);
       clearCart();
-      onDone(d);
+      // the server sends anyone but the owner the number masked; the bill just made shows the one typed here
+      onDone(!masked && phone && isMaskedPhone(d.sale.customer_phone) ? { ...d, sale: { ...d.sale, customer_phone: phone } } : d);
     } catch (e) {
       toast(e.message, "error", 4000);
     } finally {
@@ -209,9 +215,18 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
               maxLength={10}
               placeholder="Walk-in customer"
               value={cust.phone || ""}
+              readOnly={maskedPhone}
               onChange={(e) => setCust({ phone: e.target.value.replace(/\D/g, "").slice(0, 10) })}
             />
           </div>
+          {maskedPhone && (
+            <div className="hint row between">
+              <span>Number kept from the earlier bill</span>
+              <button type="button" className="btn ghost small" onClick={() => setCust({ phone: "", from_sale_id: undefined })}>
+                Use another number
+              </button>
+            </div>
+          )}
           {lookup === "loading" && (
             <div className="hint row gap-s">
               <Spinner size={14} /> Looking up customer…

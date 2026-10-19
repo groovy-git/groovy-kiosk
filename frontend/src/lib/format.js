@@ -94,6 +94,17 @@ export function initials(name) {
 // plural("bill", 1) → "1 bill", plural("bill", 3) → "3 bills"
 export const plural = (word, n) => `${n} ${word}${Number(n) === 1 ? "" : "s"}`;
 
+// customer numbers are the owner's: anyone else is sent them masked, 77XX9XX667 (maskPhone_ in backend/customers.gs)
+export const isMaskedPhone = (p) => String(p || "").includes("X");
+
+// a search that is a whole mobile number, written any way (+91 77099 74667): its 10 digits, else ""
+export function wholePhone(q) {
+  let d = String(q || "").replace(/\D/g, "");
+  if (d.length === 12 && d.startsWith("91")) d = d.slice(2);
+  if (d.length === 11 && d.startsWith("0")) d = d.slice(1);
+  return d.length === 10 ? d : "";
+}
+
 export const titleCase = (s) => String(s || "").replace(/\b\w/g, (c) => c.toUpperCase());
 
 export const METHOD_LABEL = { cash: "Cash", upi: "UPI", card: "Card", exchange: "Exchange" };

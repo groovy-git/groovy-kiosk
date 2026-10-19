@@ -4,7 +4,7 @@ import { useApp } from "../store";
 import { api } from "../lib/api";
 import { runBusy } from "../lib/busy";
 import { navigate } from "../lib/router";
-import { inr, fmtDateTime, qtyLabel, istDate, METHOD_LABEL, r2 } from "../lib/format";
+import { inr, fmtDateTime, qtyLabel, istDate, METHOD_LABEL, r2, isMaskedPhone } from "../lib/format";
 import { a4InvoiceHtml, billText, printHtml, receiptHtml, whatsappLink } from "../lib/print";
 import TopBar from "../components/TopBar";
 import { Button, Chips, Field, Seg, Sheet, SkeletonList, Stepper } from "../components/ui";
@@ -124,9 +124,12 @@ export default function SaleDetail({ id }) {
         )}
 
         <div className="grid-2 mt">
-          <a className="btn wa" href={whatsappLink(s.customer_phone, text)} target="_blank" rel="noreferrer">
-            <MessageCircle size={18} /> WhatsApp
-          </a>
+          {/* a number sent masked can't be messaged: the customer's WhatsApp is the owner's */}
+          {!isMaskedPhone(s.customer_phone) && (
+            <a className="btn wa" href={whatsappLink(s.customer_phone, text)} target="_blank" rel="noreferrer">
+              <MessageCircle size={18} /> WhatsApp
+            </a>
+          )}
           <button className="btn secondary" onClick={() => printHtml(receiptHtml(d, shop))}>
             <Printer size={18} /> Receipt
           </button>
@@ -167,7 +170,10 @@ export default function SaleDetail({ id }) {
           setCart((c) => ({
             ...c,
             client_ref: null,
-            customer: c.lines.length ? c.customer : { phone: s.customer_phone || "", name: s.customer_name || "", gstin: "" },
+            // a masked number goes with the bill it came from, and the server takes that bill's customer
+            customer: c.lines.length
+              ? c.customer
+              : { phone: s.customer_phone || "", name: s.customer_name || "", gstin: "", ...(isMaskedPhone(s.customer_phone) ? { from_sale_id: s.id } : {}) },
             exchange: { sale_id: s.id, invoice_no: s.invoice_no, reason: picked.reason, items: picked.items, back: picked.back, credit },
           }));
           setRet(null);

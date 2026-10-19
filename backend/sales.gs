@@ -24,7 +24,7 @@ function saleDetail_(s, ctx, pre) {
     };
     const b = branchById_(bid_(s.branch_id));
     return {
-        sale: Object.assign(strip(s), { branch_id: bid_(s.branch_id) }),
+        sale: Object.assign(strip(s), { branch_id: bid_(s.branch_id), customer_phone: phoneFor_(s.customer_phone, ctx) }),
         branch: b ? branchOut_(b) : null,
         items: items.map(strip),
         payments: pays.map(strip),
@@ -62,6 +62,9 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
     const existing = findBy_("Sales", "client_ref", clientRef);
     if (existing) return { message: "Sale already saved", data: saleDetail_(existing, ctx) };
 
+    // a masked number carried over from a bill is that bill's customer; settled before anything is
+    // written, so an exchange refused here leaves no credit note behind either
+    const custIn = unmaskCustomer_(p.customer, ctx, p.sale_id, p.held_id);
     const role = ctx.user.role;
     const sellerId = Number(p.salesman_id || ctx.user.id);
     if (role === "salesperson" && sellerId !== ctx.user.id) fail_("A salesperson can only bill under their own name");
@@ -130,8 +133,8 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
 
     const now = p._at || nowStr_(); // _at only used by demo seeding
     const fy = fyOf_(now);
-    const cust = upsertSaleCustomer_(p.customer, bill.grand_total, now);
-    const custGstin = str_(p.customer && p.customer.gstin).toUpperCase();
+    const cust = upsertSaleCustomer_(custIn, bill.grand_total, now);
+    const custGstin = str_(custIn && custIn.gstin).toUpperCase();
 
     const saleId = nextId_("Sales");
     const code = branchCode_(branch); // each branch has its own bill series
@@ -139,7 +142,7 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
     const sale = {
         id: saleId, client_ref: clientRef, invoice_no: invNo, fy, date: now,
         customer_id: cust ? cust.id : 0,
-        customer_name: cust ? cust.name : str_(p.customer && p.customer.name),
+        customer_name: cust ? cust.name : str_(custIn && custIn.name),
         customer_phone: cust ? cust.phone : "",
         customer_gstin: cust ? cust.gstin : custGstin,
         salesman_id: seller.id, salesman_name: seller.name, created_by: ctx.user.id,
@@ -215,9 +218,10 @@ function apiListSales_(p, ctx) {
     }
     if (p.status) rows = rows.filter((s) => s.status === p.status);
     const q = str_(p.q).toLowerCase();
+    const hit = phoneMatcher_(q, ctx);
     if (q)
         rows = rows.filter(
-            (s) => s.invoice_no.toLowerCase().indexOf(q) >= 0 || s.customer_phone.indexOf(q) >= 0 || s.customer_name.toLowerCase().indexOf(q) >= 0,
+            (s) => s.invoice_no.toLowerCase().indexOf(q) >= 0 || hit(s.customer_phone) || s.customer_name.toLowerCase().indexOf(q) >= 0,
         );
     const ids = {};
     rows.forEach((s) => (ids[s.id] = true));
@@ -233,7 +237,7 @@ function apiListSales_(p, ctx) {
         .slice()
         .reverse()
         .map((s) => ({
-            id: s.id, invoice_no: s.invoice_no, date: s.date, customer_name: s.customer_name, customer_phone: s.customer_phone,
+            id: s.id, invoice_no: s.invoice_no, date: s.date, customer_name: s.customer_name, customer_phone: phoneFor_(s.customer_phone, ctx),
             salesman_id: s.salesman_id, salesman_name: s.salesman_name, items: s.items, grand_total: s.grand_total,
             refunded: s.refunded, status: s.status, methods: Object.keys(methods[s.id] || {}),
             branch_id: bid_(s.branch_id), branch_name: branchName_(bid_(s.branch_id)),
@@ -460,8 +464,8 @@ function apiListHeld_(p, ctx) {
         data: rows
             .slice()
             .reverse()
-            .map((h) => ({
-                id: h.id, label: h.label, cart: h.cart_json, at: h.at, user_name: users[h.user_id] ? users[h.user_id].name : "",
+            .map((h) => Object.assign({ id: h.id }, heldOut_(h, ctx), {
+                at: h.at, user_name: users[h.user_id] ? users[h.user_id].name : "",
                 branch_id: bid_(h.branch_id), branch_name: branchName_(bid_(h.branch_id)),
             })),
     };

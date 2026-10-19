@@ -17,6 +17,7 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
     - **Salesperson**: billing, with a discount limit, and returns up to a rupee limit you set.
     - **Stock Mover**: sees products and stock at the branches you tick, moves stock between branches and adjusts stock (damage, a corrected count). No billing, and no sales, customers, expenses or reports.
     - Owner, managers and salespeople can all sell, and every bill records who sold it.
+    - **Customer numbers are the owner's.** Managers and salespeople see them masked (7709974667 shows as 77XX9XX667) on the Customers screen, on bills, on bills held by someone else and in reports. They cannot add, edit, call, chat with or save a customer to their phone. A number they type at checkout shows in full on that bill's receipt and WhatsApp.
 
 ---
 
@@ -162,7 +163,7 @@ The app prints an **80 mm receipt** or an **A4 tax invoice** using the phone's o
 **Daily use**
 
 - **Sell:** scan or tap items, then **View bill → Checkout**. Enter the customer's mobile number (optional), choose Cash, UPI or Card (tap **Split payment** to combine them), then tap **Complete**. Share the bill on WhatsApp or print it.
-- **Customers:** go to **More → Customers** and tap a customer to call them, chat on WhatsApp or see their bills. The owner and managers also get **Add to contacts**: it hands the name and number to the phone, and the phone's Contacts app asks you to save (on an iPhone, choose **Contacts** in the share sheet that opens). Once tapped it reads **Added to contacts** on that phone.
+- **Customers:** go to **More → Customers** and tap a customer to see their bills. The owner can also call them, chat on WhatsApp, edit them, add a customer by hand, and use **Add to contacts**: it hands the name and number to the phone, and the phone's Contacts app asks you to save (on an iPhone, choose **Contacts** in the share sheet that opens). Once tapped it reads **Added to contacts** on that phone. Managers and salespeople find a customer by name or by the full mobile number; part of a number finds nothing.
 - **End of day:** go to **More → Reports → Day close**. It shows the cash you should have in the drawer and a breakdown by salesperson.
 
 ## Branches (more than one shop)

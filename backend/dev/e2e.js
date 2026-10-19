@@ -2529,5 +2529,170 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("the message says to delete the demo staff before going live", /Delete them in More → Staff/.test(dMsg));
 }
 
+// ---- customer numbers are the owner's: managers and salespeople are sent them masked ----
+{
+    const cEnv = createEnv();
+    cEnv.ctx.setupSheets();
+    const cPwd = /Password: (\S+)/.exec(cEnv.alerts.pop())[1];
+    const CT = cEnv.call("login", { email: "owner@groovy.test", password: cPwd }).data.token;
+    const cCat = cEnv.call("bootstrap", {}, CT).data.catalog.categories[0].id;
+    cEnv.call("saveProduct", { name: "Mask Test", category_id: cCat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: 1000, sell_price: 1000, cost: 400, opening_stock: 50, barcode: "MK1" }] }, CT, 1);
+    const MK = cEnv.call("getCatalog", {}, CT, 1).data.variants.find((v) => v.barcode === "MK1").id;
+    cEnv.call("saveUser", { name: "Mask Sp", email: "mk-sp@x.in", role: "salesperson", password: "shop-pass-1" }, CT);
+    cEnv.call("saveUser", { name: "Mask Sp Two", email: "mk-sp2@x.in", role: "salesperson", password: "shop-pass-3" }, CT);
+    cEnv.call("saveUser", { name: "Mask Mgr", email: "mk-mgr@x.in", role: "manager", password: "shop-pass-2" }, CT);
+    const CS = cEnv.call("login", { email: "mk-sp@x.in", password: "shop-pass-1" }).data.token;
+    const CS2 = cEnv.call("login", { email: "mk-sp2@x.in", password: "shop-pass-3" }).data.token;
+    const CM = cEnv.call("login", { email: "mk-mgr@x.in", password: "shop-pass-2" }).data.token;
+    const cc = (a, p, t) => cEnv.call(a, p, t, 1);
+    const FULL = "7709974667";
+    const MASK = "77XX9XX667";
+    let mkRef = 0;
+    const sell = (token, customer, extra) => cc("completeSale", Object.assign({ client_ref: "mk" + ++mkRef, lines: [{ variant_id: MK, qty: 1 }], payments: [{ method: "cash", amount: 1000 }], customer }, extra || {}), token).data;
+    const ownerSale = (id) => cc("getSale", { id }, CT).data.sale;
+    const billCount = () => cEnv.ctx.rows_("Sales").length;
+    const cnCount = () => cEnv.ctx.rows_("Returns").length;
+
+    check("mask: 7709974667 shows as 77XX9XX667", cEnv.ctx.maskPhone_(FULL) === MASK, cEnv.ctx.maskPhone_(FULL));
+    check("mask: anything not 10 digits keeps only its last 3", cEnv.ctx.maskPhone_("12345") === "XX345", cEnv.ctx.maskPhone_("12345"));
+
+    // a salesperson bills a customer by typing the number
+    const b1 = sell(CS, { phone: FULL, name: "Mask Customer" });
+    check("a salesperson's sale goes through", !!(b1 && b1.sale), b1);
+    check("...its reply carries the number masked (the app keeps the one it typed)", b1.sale.customer_phone === MASK, b1.sale.customer_phone);
+    check("...the bill itself holds the full number, for the owner", ownerSale(b1.sale.id).customer_phone === FULL, ownerSale(b1.sale.id).customer_phone);
+    const walkIn = sell(CS, {});
+    check("a walk-in bill has no number for anyone", walkIn.sale.customer_phone === "" && ownerSale(walkIn.sale.id).customer_phone === "", walkIn.sale.customer_phone);
+
+    // every reply that carries the number
+    const listOf = (t, q) => cc("listCustomers", q ? { q } : {}, t).data;
+    const custOf = (t, q) => listOf(t, q).find((c) => c.name === "Mask Customer");
+    check("customer list: the owner sees the full number", custOf(CT).phone === FULL, custOf(CT));
+    check("customer list: a manager sees it masked", custOf(CM).phone === MASK, custOf(CM));
+    check("customer list: a salesperson sees it masked", custOf(CS).phone === MASK, custOf(CS));
+    const cid = custOf(CT).id;
+    check("customer sheet: a manager is sent it masked", cc("customerHistory", { id: cid }, CM).data.customer.phone === MASK);
+    check("customer sheet: the owner is sent it in full", cc("customerHistory", { id: cid }, CT).data.customer.phone === FULL);
+    const found = cc("findCustomer", { phone: FULL }, CS2).data;
+    check("checkout lookup still finds the returning customer, number masked", found && found.name === "Mask Customer" && found.bills === 1 && found.phone === MASK, found);
+    const inList = (t) => cc("listSales", {}, t).data.sales.find((s) => s.id === b1.sale.id);
+    check("sales list: masked for the manager and the salesperson, full for the owner", inList(CM).customer_phone === MASK && inList(CS).customer_phone === MASK && inList(CT).customer_phone === FULL, [inList(CM).customer_phone, inList(CS).customer_phone, inList(CT).customer_phone]);
+    check("bill page: masked for the manager and the salesperson, full for the owner",
+        cc("getSale", { id: b1.sale.id }, CM).data.sale.customer_phone === MASK && cc("getSale", { id: b1.sale.id }, CS).data.sale.customer_phone === MASK && ownerSale(b1.sale.id).customer_phone === FULL);
+    const regRow = (t) => cc("report", { type: "sales_register" }, t).data.rows.find((r) => r.invoice_no === b1.sale.invoice_no);
+    check("sales register (and its CSV): masked for the manager, full for the owner", regRow(CM).phone === MASK && regRow(CT).phone === FULL, [regRow(CM).phone, regRow(CT).phone]);
+    const b2 = sell(CS, { phone: FULL });
+    const ret = cc("returnItems", { sale_id: b2.sale.id, items: [{ sale_item_id: b2.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "Wrong size" }, CM);
+    check("a return's reply: masked for the manager", ret.success && ret.data.sale.customer_phone === MASK, ret.message || ret.data.sale.customer_phone);
+    const b3 = sell(CM, { phone: FULL });
+    const vd = cc("voidSale", { id: b3.sale.id, reason: "mistake" }, CM);
+    check("a void's reply: masked for the manager", vd.success && vd.data.sale.customer_phone === MASK, vd.message || vd.data.sale.customer_phone);
+    check("an owner's own sale reply is in full, as before", sell(CT, { phone: FULL }).sale.customer_phone === FULL);
+    check("an invoice PDF keeps the full number", cEnv.ctx.invoicePdfHtml_(cEnv.ctx.saleDetail_(cEnv.ctx.findById_("Sales", b1.sale.id), null)).indexOf(FULL) >= 0);
+
+    // search: part of a number gives nothing away
+    const names = (t, q) => listOf(t, q).map((c) => c.name);
+    check("customer search, manager: part of the number finds nothing", names(CM, "7709").length === 0 && names(CM, "99746").length === 0 && names(CM, "667").length === 0, [names(CM, "7709"), names(CM, "667")]);
+    check("customer search, salesperson: part of the number finds nothing", names(CS, "770997").length === 0, names(CS, "770997"));
+    check("customer search, manager: the full number finds them, typed any way", names(CM, FULL).join() === "Mask Customer" && names(CM, "+91 77099 74667").join() === "Mask Customer", [names(CM, FULL), names(CM, "+91 77099 74667")]);
+    check("customer search, manager: the name still finds them", names(CM, "mask cust").join() === "Mask Customer", names(CM, "mask cust"));
+    check("customer search, owner: part of the number still works", names(CT, "7709").join() === "Mask Customer", names(CT, "7709"));
+    const billsFor = (t, q) => cc("listSales", { q }, t).data.sales.filter((s) => s.id === b1.sale.id).length;
+    check("bill search: part of the number finds nothing for the manager, the full number does", billsFor(CM, "7709") === 0 && billsFor(CM, FULL) === 1, [billsFor(CM, "7709"), billsFor(CM, FULL)]);
+    check("bill search: the owner's part-number search still works", billsFor(CT, "7709") === 1);
+
+    // adding and editing by hand is the owner's
+    check("a manager cannot add a customer", cc("saveCustomer", { name: "Sneaky", phone: "9811122233" }, CM).code === "FORBIDDEN");
+    check("a salesperson cannot add a customer", cc("saveCustomer", { name: "Sneaky", phone: "9811122233" }, CS).code === "FORBIDDEN");
+    check("a manager cannot edit one", cc("saveCustomer", { id: cid, name: "Renamed", phone: FULL }, CM).code === "FORBIDDEN" && custOf(CT).name === "Mask Customer");
+    const added = cc("saveCustomer", { name: "Owner Added", phone: "9811122233" }, CT);
+    check("the owner adds one, and sees the full number", added.success && added.data.phone === "9811122233", added);
+
+    // a masked number carried from a bill stands for that bill's customer
+    const b4 = sell(CS, { phone: FULL, name: "Mask Customer" });
+    const xc = cc("exchange", { client_ref: "mk-x1", sale_id: b4.sale.id, items: [{ sale_item_id: b4.items[0].id, qty: 1, restock: true }], reason: "Wrong size",
+        lines: [{ variant_id: MK, qty: 1 }], payments: [], refund_method: "cash", customer: { phone: MASK, name: "Mask Customer" } }, CS);
+    check("exchange with the masked number goes through", xc.success, xc.message);
+    check("...the new bill is the same customer, with the full number", xc.success && ownerSale(xc.data.sale.id).customer_id === cid && ownerSale(xc.data.sale.id).customer_phone === FULL, xc.success && ownerSale(xc.data.sale.id));
+    check("...its reply is masked for the salesperson", xc.success && xc.data.sale.customer_phone === MASK);
+    const off = sell(CS, { phone: MASK, name: "Mask Customer", from_sale_id: b4.sale.id });
+    check("an exchange called off (an ordinary bill) keeps the customer too", !!(off && off.sale) && ownerSale(off.sale.id).customer_id === cid && ownerSale(off.sale.id).customer_phone === FULL, off);
+    check("no customer is ever saved under a masked number", cc("listCustomers", {}, CT).data.every((c) => c.phone.indexOf("X") < 0));
+
+    // anything else masked is refused, before a thing is written
+    const before = { bills: billCount(), cns: cnCount() };
+    const refusedMsg = /Enter the customer's mobile number again/;
+    const noBill = cc("completeSale", { client_ref: "mk-bad1", lines: [{ variant_id: MK, qty: 1 }], payments: [{ method: "cash", amount: 1000 }], customer: { phone: MASK } }, CS);
+    check("a masked number with no bill behind it is refused", refusedMsg.test(noBill.message), noBill.message);
+    const wrong = cc("completeSale", { client_ref: "mk-bad2", lines: [{ variant_id: MK, qty: 1 }], payments: [{ method: "cash", amount: 1000 }], customer: { phone: "77XX9XX668", from_sale_id: b4.sale.id } }, CS);
+    check("a mask that doesn't match the bill's number is refused", refusedMsg.test(wrong.message), wrong.message);
+    const notMine = cc("completeSale", { client_ref: "mk-bad3", lines: [{ variant_id: MK, qty: 1 }], payments: [{ method: "cash", amount: 1000 }], customer: { phone: MASK, from_sale_id: b4.sale.id } }, CS2);
+    check("a masked number from a bill the salesperson can't see is refused", refusedMsg.test(notMine.message), notMine.message);
+    const b5 = sell(CS, { phone: FULL });
+    before.bills = billCount();
+    const badX = cc("exchange", { client_ref: "mk-x-bad", sale_id: b5.sale.id, items: [{ sale_item_id: b5.items[0].id, qty: 1, restock: true }], reason: "Wrong size",
+        lines: [{ variant_id: MK, qty: 1 }], payments: [], refund_method: "cash", customer: { phone: "77XX9XX668" } }, CS);
+    check("an exchange with a wrong mask is refused", refusedMsg.test(badX.message), badX.message);
+    check("...and leaves no credit note and no bill behind", billCount() === before.bills && cnCount() === before.cns && ownerSale(b5.sale.id).refunded === 0, [billCount() - before.bills, cnCount() - before.cns]);
+    const next = sell(CS, { phone: FULL });
+    check("...nor a gap in the bill numbers", Number(/(\d+)$/.exec(next.sale.invoice_no)[1]) === Number(/(\d+)$/.exec(b5.sale.invoice_no)[1]) + 1, [b5.sale.invoice_no, next.sale.invoice_no]);
+
+    // held bills: whoever typed the number sees it; anyone else but the owner gets it masked, label too
+    const csId = cEnv.call("login", { email: "mk-sp@x.in", password: "shop-pass-1" }).data.user.id;
+    const holdAs = (token, customer, label) => cc("holdBill", { label, cart: { lines: [{ variant_id: MK, qty: 1 }], customer, salesman_id: csId } }, token);
+    const heldBy = (token, id) => cc("listHeld", {}, token).data.find((h) => h.id === id);
+    const hOwner = holdAs(CT, { phone: FULL, name: "" }, FULL).data.id;
+    check("a bill held by the owner, as the manager sees it: number and label masked",
+        heldBy(CM, hOwner).label === MASK && heldBy(CM, hOwner).cart.customer.phone === MASK, heldBy(CM, hOwner));
+    check("...as the salesperson it is sold under sees it: masked too", heldBy(CS, hOwner).cart.customer.phone === MASK && heldBy(CS, hOwner).label === MASK, heldBy(CS, hOwner));
+    check("...as the owner sees it: in full", heldBy(CT, hOwner).cart.customer.phone === FULL && heldBy(CT, hOwner).label === FULL);
+    const hMine = holdAs(CS, { phone: FULL, name: "Mask Customer" }, "Mask Customer").data.id;
+    check("a bill the salesperson held: they see the number they typed", heldBy(CS, hMine).cart.customer.phone === FULL, heldBy(CS, hMine).cart.customer);
+    check("...the manager sees it masked", heldBy(CM, hMine).cart.customer.phone === MASK, heldBy(CM, hMine).cart.customer);
+    const fromHeld = cc("completeSale", { client_ref: "mk-held-1", held_id: hOwner, lines: [{ variant_id: MK, qty: 1 }], payments: [{ method: "cash", amount: 1000 }], customer: { phone: MASK } }, CM);
+    check("the manager completes the owner's held bill with the masked number", fromHeld.success, fromHeld.message);
+    check("...the bill is that customer, with the full number", fromHeld.success && ownerSale(fromHeld.data.sale.id).customer_id === cid && ownerSale(fromHeld.data.sale.id).customer_phone === FULL);
+    check("...and the held bill is gone", !heldBy(CT, hOwner));
+    const hOther = holdAs(CS, { phone: FULL }, "Not yours").data.id;
+    const notTheirs = cc("completeSale", { client_ref: "mk-held-2", held_id: hOther, lines: [{ variant_id: MK, qty: 1 }], payments: [{ method: "cash", amount: 1000 }], customer: { phone: MASK } }, CS2);
+    check("a masked number from a held bill the salesperson can't see is refused", refusedMsg.test(notTheirs.message), notTheirs.message);
+    const wrongHeld = cc("completeSale", { client_ref: "mk-held-3", held_id: hOther, lines: [{ variant_id: MK, qty: 1 }], payments: [{ method: "cash", amount: 1000 }], customer: { phone: "77XX9XX668" } }, CM);
+    check("a mask that doesn't match the held bill's number is refused", refusedMsg.test(wrongHeld.message), wrongHeld.message);
+    const hFromX = holdAs(CS, { phone: MASK, name: "Mask Customer", from_sale_id: b4.sale.id }, "From an exchange").data.id;
+    check("a held bill whose number was masked already is shown as it is, not masked twice", heldBy(CM, hFromX).cart.customer.phone === MASK, heldBy(CM, hFromX).cart.customer);
+    const fromHeldX = cc("completeSale", { client_ref: "mk-held-4", held_id: hFromX, lines: [{ variant_id: MK, qty: 1 }], payments: [{ method: "cash", amount: 1000 }], customer: { phone: MASK } }, CM);
+    check("...completing it finds the customer through the bill it came from", fromHeldX.success && ownerSale(fromHeldX.data.sale.id).customer_id === cid, fromHeldX.message);
+
+    // a number the owner corrected after the bill: an exchange takes the customer as they are now
+    const MOVED_OLD = "9822233344";
+    const MOVED_NEW = "9822233355";
+    const bm = sell(CS, { phone: MOVED_OLD, name: "Moved Customer" });
+    const movedId = listOf(CT, "Moved")[0].id;
+    check("the owner corrects a customer's number", cc("saveCustomer", { id: movedId, name: "Moved Customer", phone: MOVED_NEW }, CT).success);
+    const xm = cc("exchange", { client_ref: "mk-x-moved", sale_id: bm.sale.id, items: [{ sale_item_id: bm.items[0].id, qty: 1, restock: true }], reason: "Wrong size",
+        lines: [{ variant_id: MK, qty: 1 }], payments: [], refund_method: "cash", customer: { phone: cEnv.ctx.maskPhone_(MOVED_OLD), name: "Moved Customer" } }, CS);
+    check("exchanging that customer's old bill with the masked number goes through", xm.success, xm.message);
+    check("...the new bill is the same customer at the corrected number", xm.success && ownerSale(xm.data.sale.id).customer_id === movedId && ownerSale(xm.data.sale.id).customer_phone === MOVED_NEW, xm.success && ownerSale(xm.data.sale.id));
+    check("...and no customer comes back under the old number", cc("listCustomers", { q: MOVED_OLD }, CT).data.length === 0, cc("listCustomers", { q: MOVED_OLD }, CT).data);
+
+    // nothing a manager or salesperson can read carries a full number they didn't type themselves: every
+    // read the server has (the salesperson's own held bills, with the number they typed, are cleared first)
+    check("(the salesperson's own held bills cleared)", cc("deleteHeld", { id: hMine }, CS).success && cc("deleteHeld", { id: hOther }, CS).success);
+    holdAs(CT, { phone: FULL, name: "Held For Sweep" }, FULL);
+    const reads = [
+        ["bootstrap", {}], ["me", {}], ["dashboard", {}], ["listSales", {}], ["getSale", { id: b1.sale.id }], ["listHeld", {}],
+        ["listCustomers", {}], ["listCustomers", { q: FULL }], ["customerHistory", { id: cid }], ["findCustomer", { phone: FULL }],
+        ["listSellers", {}], ["getSettings", {}], ["getCatalog", {}], ["getStock", {}], ["movements", { variant_id: MK }], ["listExpenses", {}],
+        ["stockInBatches", {}], ["listTransfers", {}], ["listUsers", {}], ["listLogs", {}], ["listBranches", {}],
+    ].concat(["day_close", "salesman_performance", "sales_register", "gst_summary", "product_sales", "profit", "stock_valuation", "expenses"].map((type) => ["report", { type }]));
+    const leaks = [];
+    [["manager", CM], ["salesperson", CS]].forEach(([who, t]) =>
+        reads.forEach(([a, p]) => {
+            if (JSON.stringify(cc(a, p, t)).indexOf(FULL) >= 0) leaks.push(who + " " + a + (p.type ? " " + p.type : ""));
+        }));
+    check("no reply to a manager or salesperson carries a full customer number (" + reads.length + " reads each)", leaks.length === 0, leaks);
+    check("...while the same reads do carry it for the owner (so the sweep can see one)", ["listCustomers", "listHeld", "listSales"].every((a) => JSON.stringify(cc(a, {}, CT)).indexOf(FULL) >= 0));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

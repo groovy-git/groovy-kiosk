@@ -41,7 +41,7 @@ function actions_() {
     listSellers: { fn: apiListSellers_, roles: ALL_ },
     findCustomer: { fn: apiFindCustomer_, roles: ALL_ },
     listCustomers: { fn: apiListCustomers_, roles: ALL_ },
-    saveCustomer: { fn: apiSaveCustomer_, roles: ALL_ },
+    saveCustomer: { fn: apiSaveCustomer_, roles: A_ }, // only the owner adds or edits a customer by hand
     customerHistory: { fn: apiCustomerHistory_, roles: ALL_ },
     completeSale: { fn: apiCompleteSale_, roles: ALL_ },
     listSales: { fn: apiListSales_, roles: ALL_ },
