@@ -108,6 +108,12 @@ export function SaleSummary({ detail }) {
             <span className="money">{inr(i.line_total)}</span>
           </div>
         ))}
+        {s.offer && (
+          <div className="kv small">
+            <span className="k">Offer · {s.offer}</span>
+            <span className="money ok-text">−{inr(s.bill_disc)}</span>
+          </div>
+        )}
         <div className="divider" />
         {pays.map((p) => (
           <div key={p.id} className="kv small">

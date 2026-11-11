@@ -90,7 +90,7 @@ export default function SaleDetail({ id }) {
 
         <div className="card mt">
           <div className="kv"><span className="k">Items total</span><span>{inr(s.gross)}</span></div>
-          {s.item_disc + s.bill_disc > 0 && <div className="kv"><span className="k">Discount</span><span className="ok-text">−{inr(r2(s.item_disc + s.bill_disc))}</span></div>}
+          {s.item_disc + s.bill_disc > 0 && <div className="kv"><span className="k">{s.offer ? `Discount · ${s.offer}` : "Discount"}</span><span className="ok-text">−{inr(r2(s.item_disc + s.bill_disc))}</span></div>}
           {showGst && <div className="kv"><span className="k">Taxable value</span><span>{inr(s.taxable, { paise: true })}</span></div>}
           {showGst && <div className="kv"><span className="k">CGST + SGST</span><span>{inr(r2(s.cgst + s.sgst), { paise: true })}</span></div>}
           {s.round_off !== 0 && <div className="kv"><span className="k">Round off</span><span>{inr(s.round_off, { paise: true })}</span></div>}

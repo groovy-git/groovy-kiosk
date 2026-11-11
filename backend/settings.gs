@@ -70,11 +70,52 @@ function apiGetSettings_(p, ctx) {
 const EDITABLE_SETTINGS_ = [
     "business_name", "tagline", "address", "phone", "email", "gstin", "state_name", "state_code",
     "invoice_prefix", "tola_ml", "salesman_max_disc_pct", "salesperson_max_return", "return_days", "round_off",
-    "allow_negative_stock", "receipt_footer", "expense_categories",
+    "allow_negative_stock", "receipt_footer", "expense_categories", "offers",
     "report_emails", "nightly_report", "nightly_report_hour", "nightly_report_skip_empty", "invoice_pdfs",
     "forgot_password",
 ];
 const NIGHTLY_KEYS_ = ["nightly_report", "nightly_report_hour"];
+
+/**
+ * The owner's offers, checked and tidied before they are kept: whatever the app sent, what is stored
+ * is a plain list checkout can rely on. Kinds and limits as in offerDiscount_ (gst.gs).
+ */
+function cleanOffers_(raw) {
+    let list = raw;
+    if (typeof raw === "string") {
+        try {
+            list = JSON.parse(raw || "[]");
+        } catch (e) {
+            list = null;
+        }
+    }
+    if (!Array.isArray(list)) fail_("The offers could not be read. Please try again.");
+    if (list.length > 20) fail_("Keep at most 20 offers");
+    const seen = {};
+    return list.map((o, i) => {
+        o = o || {};
+        const name = str_(o.name);
+        if (!name) fail_("Every offer needs a name");
+        if (name.length > 30) fail_("“" + name + "”: keep offer names to 30 characters");
+        let id = str_(o.id).replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) || "o" + (i + 1) + "-" + Date.now().toString(36);
+        if (seen[id]) id = id.slice(0, 16) + "-" + (i + 1);
+        seen[id] = true;
+        const active = o.active !== false && o.active !== "no";
+        if (o.type === "pct") {
+            const pct = r2_(num_(o.pct));
+            if (!(pct >= 1 && pct <= 90)) fail_(name + ": the discount must be between 1% and 90%");
+            return { id, name, type: "pct", pct, active };
+        }
+        if (o.type === "buy") {
+            const buy = num_(o.buy);
+            const pay = num_(o.pay);
+            if (Math.floor(buy) !== buy || Math.floor(pay) !== pay || !(pay >= 1 && buy > pay && buy <= 10))
+                fail_(name + ": buy and pay must be whole numbers, pay at least 1 and less than buy (buy up to 10)");
+            return { id, name, type: "buy", buy, pay, active };
+        }
+        fail_(name + ": choose % off or buy-and-pay");
+    });
+}
 
 function apiSaveSettings_(p, ctx) {
     const vals = p.settings || {};
@@ -93,6 +134,12 @@ function apiSaveSettings_(p, ctx) {
     if (vals.nightly_report !== undefined && ["yes", "no"].indexOf(vals.nightly_report) < 0) fail_("Invalid nightly email option");
     if (vals.nightly_report_skip_empty !== undefined && ["yes", "no"].indexOf(vals.nightly_report_skip_empty) < 0) fail_("Invalid option");
     if (vals.forgot_password !== undefined && ["yes", "no"].indexOf(vals.forgot_password) < 0) fail_("Invalid forgot-password option");
+    // the app sends every setting on each save: offers are checked only when they change, so offers
+    // damaged in the Sheet by hand never stop the owner saving anything else
+    if (vals.offers !== undefined) {
+        if (str_(vals.offers) === str_(setting_("offers"))) delete vals.offers;
+        else vals.offers = JSON.stringify(cleanOffers_(vals.offers));
+    }
     if (vals.nightly_report_hour !== undefined) {
         const h = parseInt(vals.nightly_report_hour, 10);
         if (isNaN(h) || h < 0 || h > 23) fail_("Choose an hour between 0 and 23");

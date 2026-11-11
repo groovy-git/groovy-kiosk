@@ -65,6 +65,72 @@ export function computeBill(lines, billDisc, roundToRupee = true) {
   };
 }
 
+/** The owner's offers (the `offers` setting, JSON). Unreadable reads as none, as on the server. */
+export function offersOf(settings) {
+  try {
+    const v = JSON.parse((settings && settings.offers) || "[]");
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * What an offer takes off, in rupees — same maths as the server's offerDiscount_ (backend/gst.gs), which
+ * checks it again on save. lines: [{price, qty, discount, unit}], discount = rupees off the whole line.
+ *  - % off: that share of the bill after item discounts.
+ *  - Buy X, pay for Y: only pieces count (not loose attar by ml); for every X pieces the cheapest X − Y
+ *    go free, each at its price after its own line's discount.
+ */
+export function offerDiscount(offer, lines) {
+  if (!offer) return 0;
+  if (offer.type === "pct") {
+    const base = r2(
+      lines.reduce((s, l) => {
+        const gross = r2(Number(l.price) * Number(l.qty));
+        return s + gross - Math.min(r2(Number(l.discount) || 0), gross);
+      }, 0),
+    );
+    return r2((base * Math.min(Math.max(Number(offer.pct) || 0, 0), 100)) / 100);
+  }
+  if (offer.type === "buy") {
+    const buy = Math.floor(Number(offer.buy) || 0);
+    const pay = Math.floor(Number(offer.pay) || 0);
+    if (!(pay >= 1 && buy > pay)) return 0;
+    const units = [];
+    lines.forEach((l) => {
+      const n = Math.floor(Number(l.qty) || 0);
+      if (l.unit !== "pcs" || n <= 0) return;
+      const gross = r2(Number(l.price) * n);
+      const each = r2((gross - Math.min(r2(Number(l.discount) || 0), gross)) / n);
+      for (let i = 0; i < n; i++) units.push(each);
+    });
+    const free = Math.floor(units.length / buy) * (buy - pay);
+    units.sort((a, b) => a - b);
+    return r2(units.slice(0, free).reduce((s, x) => s + x, 0));
+  }
+  return 0;
+}
+
+/**
+ * The most a salesperson may take off a bill with an offer: the bigger of their limit and the offer
+ * counted at full prices, as the server checks it. Their limit is rounded down to the paisa, so an
+ * amount filled in from it is never a hair over and refused.
+ */
+export function offerAllowance(offer, lines, capPct) {
+  const gross = r2(lines.reduce((s, l) => s + r2(Number(l.price) * Number(l.qty)), 0));
+  const atFull = offer ? offerDiscount(offer, lines.map((l) => ({ ...l, discount: 0 }))) : 0;
+  return Math.max(Math.floor(gross * capPct + 1e-6) / 100, atFull);
+}
+
+/** The bill discount an offer fills in: what it is worth, and for a salesperson never past what they may give. */
+export function offerFill(offer, lines, salesperson, capPct) {
+  const full = offerDiscount(offer, lines);
+  if (!salesperson) return full;
+  const itemDisc = r2(lines.reduce((s, l) => s + Math.min(r2(Number(l.discount) || 0), r2(Number(l.price) * Number(l.qty))), 0));
+  return Math.max(0, Math.min(full, r2(offerAllowance(offer, lines, capPct) - itemDisc)));
+}
+
 export function newClientRef() {
   if (crypto.randomUUID) return crypto.randomUUID();
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 12);

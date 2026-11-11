@@ -100,11 +100,24 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
 
     const bill = computeBill_(priced, p.bill_disc, s.round_off !== "no");
 
+    // an offer picked at checkout must be one of the owner's, switched on; what it is worth is worked out here
+    let offer = null;
+    if (p.offer_id) {
+        offer = offersOf_(s.offers).filter((o) => String(o.id) === String(p.offer_id) && o.active !== false)[0] || null;
+        if (!offer) fail_("This offer is no longer available. Choose another, or no offer.");
+    }
+
     if (role === "salesperson") {
         const cap = num_(s.salesman_max_disc_pct, 10);
         const disc = bill.item_disc + bill.bill_disc;
-        if (bill.gross > 0 && (disc / bill.gross) * 100 > cap + 0.001)
-            fail_("Discount limit for a salesperson is " + cap + "%. Ask a manager.");
+        const overCap = bill.gross > 0 && (disc / bill.gross) * 100 > cap + 0.001;
+        // with an offer they may give up to the offer instead, when it is worth more. Counted at full
+        // prices, so an item discount eats into that allowance rather than stretching it.
+        const offerMax = offer ? offerDiscount_(offer, priced.map((l) => ({ price: l.price, qty: l.qty, discount: 0, unit: l._v.unit }))) : 0;
+        if (overCap && !(offer && disc <= offerMax + 0.01))
+            fail_(offer
+                ? "With " + offer.name + " a salesperson can give up to ₹" + Math.max(r2_((bill.gross * cap) / 100), offerMax) + " off this bill. Ask a manager for more."
+                : "Discount limit for a salesperson is " + cap + "%. Ask a manager.");
     }
 
     // payments
@@ -152,6 +165,9 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
         tendered, change, refunded: 0, status: "completed", notes: str_(p.notes).slice(0, 300), updated_at: now,
         gst_hidden: gstOff ? GST_OFF_BRANCH_ : p.gst_hidden ? 1 : 0, // decided here, whatever the app sent
         branch_id: branch,
+        // named only when the offer is worth something on this bill and the bill has a discount from it
+        // (a buy-3 offer with two items is worth nothing: a discount typed there is not the offer's)
+        offer: offer && bill.bill_disc > 0 && offerDiscount_(offer, priced.map((l) => ({ price: l.price, qty: l.qty, discount: l.discount, unit: l._v.unit }))) > 0 ? offer.name : "",
     };
 
     let siId = nextId_("Sale_Items");

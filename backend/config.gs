@@ -153,6 +153,7 @@ const SCHEMA = {
         gst_hidden: "n",
         branch_id: "n",
         pdf_url: "s", // invoice PDF in Drive (…#void once renamed -VOID)
+        offer: "s", // the offer applied, by its name at the time ("20% off"); "" for none
     },
     Sale_Items: {
         id: "n",
@@ -286,6 +287,12 @@ const DEFAULT_SETTINGS = {
     invoice_prefix: "GF",
     tola_ml: "12",
     salesman_max_disc_pct: "10",
+    // offers picked at checkout (Settings → Billing → Offers); see offerDiscount_ in gst.gs
+    offers: JSON.stringify([
+        { id: "pct10", name: "10% off", type: "pct", pct: 10, active: true },
+        { id: "pct20", name: "20% off", type: "pct", pct: 20, active: true },
+        { id: "buy3pay2", name: "Buy 3, pay for 2", type: "buy", buy: 3, pay: 2, active: true },
+    ]),
     return_days: "3",
     // most a salesperson may refund on one bill, earlier returns on it counted; 0 = managers only
     salesperson_max_return: "2000",

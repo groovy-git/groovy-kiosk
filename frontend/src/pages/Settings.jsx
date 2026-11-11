@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Plus, Mail, Store } from "lucide-react";
+import { Plus, Mail, Store, Pencil, Trash2 } from "lucide-react";
 import { useApp } from "../store";
 import { api } from "../lib/api";
+import { offersOf } from "../lib/cart";
 import { runBusy } from "../lib/busy";
 import TopBar from "../components/TopBar";
 import { Button, Chips, Field, Seg, Sheet, SkeletonList, useConfirm } from "../components/ui";
@@ -105,6 +106,8 @@ export default function SettingsPage() {
             <Field label="Expense categories" hint="Comma separated"><textarea className="input" value={f.expense_categories || ""} onChange={set("expense_categories")} /></Field>
           </div>
         )}
+        {/* an older server has no offers to show: the card waits for it */}
+        {tab === "rules" && f.offers !== undefined && <OffersCard value={f.offers} onChange={(offers) => setF((cur) => ({ ...cur, offers }))} />}
         {tab === "catalog" && (
           <>
             <div className="section-label">Categories · default HSN & GST</div>
@@ -150,6 +153,150 @@ export default function SettingsPage() {
 
 const HOURS = [17, 18, 19, 20, 21, 22, 23];
 const hourLabel = (h) => `${h % 12 || 12} ${h < 12 ? "AM" : "PM"}`;
+
+/* ---------- offers staff can pick at checkout ---------- */
+
+const offerKind = (o) =>
+  o.type === "pct"
+    ? `${o.pct}% off the bill`
+    : `Buy ${o.buy}, pay for ${o.pay}: the cheapest ${o.buy - o.pay === 1 ? "item is" : o.buy - o.pay + " items are"} free`;
+const suggestedName = (o) => (o.type === "pct" ? (Number(o.pct) > 0 ? `${Number(o.pct)}% off` : "") : Number(o.buy) > 0 && Number(o.pay) > 0 ? `Buy ${Number(o.buy)}, pay for ${Number(o.pay)}` : "");
+
+// kept as the `offers` setting (JSON), saved with the page's Save like the rest of Billing
+function OffersCard({ value, onChange }) {
+  const offers = offersOf({ offers: value });
+  const [edit, setEdit] = useState(null);
+  const [confirm, confirmNode] = useConfirm();
+  const put = (list) => onChange(JSON.stringify(list));
+  return (
+    <div className="card mt">
+      <div className="row between">
+        <h3>Offers</h3>
+        <button className="btn ghost small" onClick={() => setEdit({ id: "", name: "", type: "pct", pct: "", buy: "3", pay: "2", active: true })}>
+          <Plus size={16} /> Add offer
+        </button>
+      </div>
+      <div className="hint">Staff pick one at checkout. A salesperson can give an offer in full even when it is more than their discount limit.</div>
+      {offers.length === 0 ? (
+        <div className="small muted mt">No offers yet.</div>
+      ) : (
+        <div className="list mt">
+          {offers.map((o) => (
+            <div key={o.id} className="list-item" style={{ cursor: "default", flexWrap: "wrap" }}>
+              <div className="grow">
+                <div className="title">{o.name}</div>
+                <div className="sub">{offerKind(o)}</div>
+              </div>
+              <div className="row" style={{ flexBasis: "100%", marginTop: 6 }}>
+                <div style={{ width: 120 }}>
+                  <Seg
+                    value={o.active === false ? "off" : "on"}
+                    onChange={(v) => put(offers.map((x) => (x.id === o.id ? { ...x, active: v === "on" } : x)))}
+                    options={[
+                      { value: "on", label: "On" },
+                      { value: "off", label: "Off" },
+                    ]}
+                  />
+                </div>
+                <div className="grow" />
+                <button className="icon-btn" aria-label={"Edit " + o.name} onClick={() => setEdit(o)}>
+                  <Pencil size={18} />
+                </button>
+                <button
+                  className="icon-btn"
+                  aria-label={"Delete " + o.name}
+                  onClick={async () =>
+                    (await confirm({ title: "Delete this offer?", text: `${o.name}. Bills already made keep its name.`, okText: "Delete", danger: true })) &&
+                    put(offers.filter((x) => x.id !== o.id))
+                  }
+                >
+                  <Trash2 size={18} />
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="hint mt">Tap “Save settings” below to apply changes to offers.</div>
+      <OfferSheet
+        offer={edit}
+        onClose={() => setEdit(null)}
+        onDone={(o) => {
+          put(offers.some((x) => x.id === o.id) ? offers.map((x) => (x.id === o.id ? o : x)) : [...offers, { ...o, id: "o" + Date.now().toString(36) }]);
+          setEdit(null);
+        }}
+      />
+      {confirmNode}
+    </div>
+  );
+}
+
+function OfferSheet({ offer, onClose, onDone }) {
+  const [o, setO] = useState({});
+  // a name that was only the suggested one keeps following the numbers; a name of the owner's own stays
+  useEffect(() => {
+    if (offer) setO({ ...offer, pct: String(offer.pct ?? ""), buy: String(offer.buy ?? 3), pay: String(offer.pay ?? 2), name: offer.name === suggestedName(offer) ? "" : offer.name || "" });
+  }, [offer]);
+  if (!offer) return null;
+  const suggested = suggestedName(o);
+  const name = (o.name || "").trim() || suggested;
+  const pct = Number(o.pct);
+  const buy = Number(o.buy);
+  const pay = Number(o.pay);
+  const numbersOk = o.type === "pct" ? pct >= 1 && pct <= 90 : Number.isInteger(buy) && Number.isInteger(pay) && pay >= 1 && buy > pay && buy <= 10;
+  const done = () =>
+    onDone(
+      o.type === "pct"
+        ? { id: offer.id, name, type: "pct", pct, active: offer.active !== false }
+        : { id: offer.id, name, type: "buy", buy, pay, active: offer.active !== false },
+    );
+  return (
+    <Sheet
+      open
+      onClose={onClose}
+      title={offer.id ? "Edit offer" : "New offer"}
+      footer={
+        <Button className="block big" disabled={!numbersOk || !name} onClick={done}>
+          Done
+        </Button>
+      }
+    >
+      <div className="field">
+        <label>Kind of offer</label>
+        <Seg
+          value={o.type}
+          onChange={(t) => setO({ ...o, type: t })}
+          options={[
+            { value: "pct", label: "% off" },
+            { value: "buy", label: "Buy X, pay for Y" },
+          ]}
+        />
+      </div>
+      {o.type === "pct" ? (
+        <Field label="Discount (%)" hint="Off the whole bill, between 1 and 90">
+          <input className="input" inputMode="decimal" value={o.pct || ""} onChange={(e) => setO({ ...o, pct: e.target.value.replace(/[^\d.]/g, "") })} />
+        </Field>
+      ) : (
+        <>
+          <div className="grid-2">
+            <Field label="Buy">
+              <input className="input" inputMode="numeric" value={o.buy || ""} onChange={(e) => setO({ ...o, buy: e.target.value.replace(/\D/g, "") })} />
+            </Field>
+            <Field label="Pay for">
+              <input className="input" inputMode="numeric" value={o.pay || ""} onChange={(e) => setO({ ...o, pay: e.target.value.replace(/\D/g, "") })} />
+            </Field>
+          </div>
+          <div className="hint mb">
+            {numbersOk ? offerKind({ type: "buy", buy, pay }) + `, for every ${buy} packed items. Loose attar doesn't count.` : "Pay for at least 1, fewer than you buy (buy up to 10)."}
+          </div>
+        </>
+      )}
+      <Field label="Name on the bill" hint={suggested ? `Leave empty for “${suggested}”. Up to 30 letters.` : "Up to 30 letters."}>
+        <input className="input" maxLength={30} placeholder={suggested} value={o.name || ""} onChange={(e) => setO({ ...o, name: e.target.value })} />
+      </Field>
+    </Sheet>
+  );
+}
 
 // Day-close emails: who receives them, and the nightly automatic email (on/off)
 function EmailSettings({ f, setF, saved }) {

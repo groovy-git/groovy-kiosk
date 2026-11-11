@@ -30,7 +30,8 @@ const OLD_ROLE_NAMES = {};
 OLD_ROLE_NAMES["sales" + "man"] = "salesperson";
 OLD_ROLE_NAMES["ad" + "min"] = "owner";
 
-const EMPTY_CART = { lines: [], bill_disc: 0, customer: { phone: "", name: "", gstin: "" }, salesman_id: null, notes: "", held_id: null, gst_hidden: false, exchange: null };
+// offer_id: the owner's offer picked at checkout; offer_auto: its discount still follows the offer (not typed over)
+const EMPTY_CART = { lines: [], bill_disc: 0, customer: { phone: "", name: "", gstin: "" }, salesman_id: null, notes: "", held_id: null, gst_hidden: false, exchange: null, offer_id: null, offer_auto: false };
 // a bill in progress belongs to the branch it was started at
 const cartKey = (branchId) => "gp_cart_" + (branchId || 0);
 const pickedKey = (userId) => "gp_branch_picked_" + userId;

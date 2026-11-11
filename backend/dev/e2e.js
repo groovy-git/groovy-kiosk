@@ -2694,5 +2694,99 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("...while the same reads do carry it for the owner (so the sweep can see one)", ["listCustomers", "listHeld", "listSales"].every((a) => JSON.stringify(cc(a, {}, CT)).indexOf(FULL) >= 0));
 }
 
+// ---- offers at checkout: the owner's list; a salesperson may give an offer even above their limit ----
+{
+    const oEnv = createEnv();
+    oEnv.ctx.setupSheets();
+    const oPwd = /Password: (\S+)/.exec(oEnv.alerts.pop())[1];
+    const OT = oEnv.call("login", { email: "owner@groovy.test", password: oPwd }).data.token;
+    const oc = (a, p, t) => oEnv.call(a, p, t || OT, 1);
+    const oCat = oc("bootstrap", {}).data.catalog.categories[0].id;
+    const mk = (name, code, price) => {
+        oc("saveProduct", { name, category_id: oCat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: price, sell_price: price, cost: price / 2, opening_stock: 50, barcode: code }] });
+        return oc("getCatalog", {}).data.variants.find((v) => v.barcode === code).id;
+    };
+    const A = mk("Offer A", "OFA", 1000);
+    const B = mk("Offer B", "OFB", 800);
+    const C = mk("Offer C", "OFC", 500);
+    oc("saveUser", { name: "Offer Sp", email: "of-sp@x.in", role: "salesperson", password: "shop-pass-1" });
+    oc("saveUser", { name: "Offer Mgr", email: "of-mgr@x.in", role: "manager", password: "shop-pass-2" });
+    const OS = oEnv.call("login", { email: "of-sp@x.in", password: "shop-pass-1" }).data.token;
+    const OM = oEnv.call("login", { email: "of-mgr@x.in", password: "shop-pass-2" }).data.token;
+    let oRef = 0;
+    const sale = (token, lines, extra) => oc("completeSale", Object.assign({ client_ref: "of" + ++oRef, lines, payments: [{ method: "cash", amount: 99999 }] }, extra || {}), token);
+    const offersNow = (t) => JSON.parse(oc("getSettings", {}, t).data.offers);
+
+    // the owner's list
+    const start = offersNow(OS);
+    check("offers: the three are there from the start, for staff too", start.map((o) => o.name).join("|") === "10% off|20% off|Buy 3, pay for 2" && start.every((o) => o.active), start);
+    const save = (offers, t) => oc("saveSettings", { settings: { offers } }, t);
+    check("offers: a manager cannot change them", save(JSON.stringify(start), OM).code === "FORBIDDEN");
+    check("offers: more than 90% is refused", /between 1% and 90%/.test(save(JSON.stringify([{ id: "x", name: "Too much", type: "pct", pct: 95 }])).message));
+    check("offers: paying as many as you buy is refused", /less than buy/.test(save(JSON.stringify([{ id: "x", name: "Silly", type: "buy", buy: 3, pay: 3 }])).message));
+    check("offers: a nameless offer is refused", /needs a name/.test(save(JSON.stringify([{ id: "x", name: " ", type: "pct", pct: 5 }])).message));
+    check("offers: more than 20 are refused", /at most 20/.test(save(JSON.stringify(Array.from({ length: 21 }, (_, i) => ({ id: "p" + i, name: "P" + i, type: "pct", pct: 5 })))).message));
+    check("offers: unreadable text is refused", /could not be read/.test(save("{oops").message));
+    const mine = start.map((o) => (o.id === "pct10" ? Object.assign({}, o, { active: false }) : o)).concat([{ id: "pct15", name: "Festive 15%", type: "pct", pct: "15", active: true, junk: 1 }]);
+    check("offers: the owner saves a changed list", save(JSON.stringify(mine)).success);
+    const after = offersNow(OS);
+    check("...stored tidy: numbers as numbers, nothing extra, 10% off switched off", after.length === 4 && after[3].pct === 15 && after[3].junk === undefined && after[0].active === false, after);
+
+    // a salesperson's limit (10%) and offers
+    const three = [{ variant_id: A, qty: 1 }, { variant_id: B, qty: 1 }, { variant_id: C, qty: 1 }]; // ₹2,300
+    check("no offer: 20% off is still refused for a salesperson", /Discount limit for a salesperson is 10%/.test(sale(OS, three, { bill_disc: 460 }).message));
+    const s20 = sale(OS, three, { bill_disc: 460, offer_id: "pct20" });
+    check("with 20% off: the salesperson gives it", s20.success && s20.data.sale.bill_disc === 460 && s20.data.sale.grand_total === 1840, s20.message || s20.data.sale);
+    check("...the bill names the offer", s20.success && s20.data.sale.offer === "20% off", s20.success && s20.data.sale.offer);
+    check("with 20% off: a smaller discount is fine", sale(OS, three, { bill_disc: 300, offer_id: "pct20" }).success);
+    const over = sale(OS, three, { bill_disc: 470, offer_id: "pct20" });
+    check("with 20% off: more than the offer is refused, saying how much is allowed", /up to ₹460 off this bill/.test(over.message), over.message);
+    const b3 = sale(OS, three, { bill_disc: 500, offer_id: "buy3pay2" });
+    check("buy 3 pay 2: the cheapest (₹500, over 21%) is given by a salesperson", b3.success && b3.data.sale.grand_total === 1800 && b3.data.sale.offer === "Buy 3, pay for 2", b3.message || b3.data.sale);
+    check("buy 3 pay 2 with only two items: nothing extra allowed", /Discount limit|up to ₹/.test(sale(OS, three.slice(0, 2), { bill_disc: 500, offer_id: "buy3pay2" }).message));
+    const six = [{ variant_id: A, qty: 2 }, { variant_id: B, qty: 2 }, { variant_id: C, qty: 2 }]; // ₹4,600, two free: 500 + 500
+    check("buy 3 pay 2 with six items: the two cheapest", sale(OS, six, { bill_disc: 1000, offer_id: "buy3pay2" }).success && /up to ₹1000/.test(sale(OS, six, { bill_disc: 1001, offer_id: "buy3pay2" }).message));
+    check("an offer switched off is refused", /no longer available/.test(sale(OS, three, { bill_disc: 230, offer_id: "pct10" }).message));
+    check("an offer that doesn't exist is refused", /no longer available/.test(sale(OS, three, { bill_disc: 100, offer_id: "nope" }).message));
+    const withItem = [{ variant_id: A, qty: 1, discount: 50 }, { variant_id: B, qty: 1 }, { variant_id: C, qty: 1 }];
+    check("an item discount counts toward the offer's allowance (₹50 + ₹430 is over ₹460)", /up to ₹460/.test(sale(OS, withItem, { bill_disc: 430, offer_id: "pct20" }).message));
+    check("...within it, it goes through", sale(OS, withItem, { bill_disc: 410, offer_id: "pct20" }).success);
+    const notWorth = sale(OS, three.slice(0, 2), { bill_disc: 100, offer_id: "buy3pay2" });
+    check("buy 3 pay 2 with two items and a small discount typed: allowed, but the bill doesn't call it the offer", notWorth.success && notWorth.data.sale.offer === "", notWorth.message || notWorth.data.sale.offer);
+    const noTake = sale(OS, three, { bill_disc: 0, offer_id: "pct20" });
+    check("an offer chosen but nothing taken off: the bill doesn't name it", noTake.success && noTake.data.sale.offer === "", noTake.success && noTake.data.sale.offer);
+    check("a manager: no limit, as before", sale(OM, three, { bill_disc: 900 }).success);
+    check("...and an offer is named on their bill too", sale(OM, three, { bill_disc: 345, offer_id: "pct15" }).data.sale.offer === "Festive 15%");
+    check("a bill without an offer has none named", sale(OS, three, {}).data.sale.offer === "");
+
+    // returns: the free amount is shared, so returning one item refunds its discounted share
+    const items = b3.data.items;
+    const cItem = items.find((i) => i.variant_id === C);
+    check("buy 3 pay 2: the discount is shared across the three items", items.every((i) => i.bill_disc_share > 0) && Math.round(items.reduce((a, i) => a + i.line_total, 0) * 100) / 100 === 1800, items.map((i) => [i.price, i.bill_disc_share, i.line_total]));
+    const back = oc("returnItems", { sale_id: b3.data.sale.id, items: [{ sale_item_id: cItem.id, qty: 1, restock: true }], refund_method: "cash", reason: "Wrong size" }, OM);
+    check("...returning the cheapest item refunds its share, not ₹500 and not ₹0", back.success && back.data.returns[0].total === cItem.line_total && cItem.line_total > 0 && cItem.line_total < 500, back.message || [back.data.returns[0].total, cItem.line_total]);
+
+    // the offer goes everywhere the bill goes
+    const xc = oc("exchange", { client_ref: "of-x1", sale_id: s20.data.sale.id, items: [{ sale_item_id: s20.data.items[0].id, qty: 1, restock: true }], reason: "Wrong size",
+        lines: three, bill_disc: 460, offer_id: "pct20", payments: [{ method: "cash", amount: 99999 }], refund_method: "cash" }, OS);
+    check("an exchange's new bill can carry an offer above the salesperson's limit", xc.success && xc.data.sale.offer === "20% off", xc.message);
+    const hb = oc("holdBill", { label: "Held offer", cart: { lines: three, bill_disc: 460, offer_id: "pct20" } }, OS);
+    check("a held bill keeps its offer", hb.success && oc("listHeld", {}, OS).data.find((h) => h.id === hb.data.id).cart.offer_id === "pct20");
+    const reg = oc("report", { type: "sales_register" }).data.rows.find((r) => r.invoice_no === s20.data.sale.invoice_no);
+    check("the sales register (and its CSV) names the offer", reg && reg.offer === "20% off", reg);
+    const pdf = oEnv.ctx.invoicePdfHtml_(oEnv.ctx.saleDetail_(oEnv.ctx.findById_("Sales", s20.data.sale.id), null));
+    check("the invoice PDF names the offer beside the discount", pdf.indexOf("Discount · 20% off") >= 0);
+
+    // offers damaged in the Sheet by hand: billing carries on without offers, and other settings still save
+    oEnv.ctx.resetReqCache_();
+    oEnv.ctx.setSetting_("offers", "[{oops", 0);
+    const damaged = oc("getSettings", {}).data.offers;
+    check("(offers damaged by hand in the Sheet)", damaged === "[{oops", damaged);
+    const other = oc("saveSettings", { settings: { business_name: "Groovy Test", offers: damaged } });
+    check("...the owner still saves other settings, the page sending the offers back unchanged", other.success && oc("getSettings", {}).data.business_name === "Groovy Test", other.message);
+    check("...checkout treats them as no offers", /no longer available/.test(sale(OS, three, { bill_disc: 460, offer_id: "pct20" }).message));
+    check("...and changing them is checked as before", /could not be read/.test(save("[{still bad").message) && save(JSON.stringify(start)).success && offersNow(OS).length === 3);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

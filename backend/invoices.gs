@@ -234,7 +234,7 @@ function invoicePdfHtml_(d) {
     // sitting at a different place from the CGST/SGST rows above it
     const totals =
         '<table class="tot">' + line("Items total", inrText_(sale.gross)) +
-        (disc > 0 ? line("Discount", "-" + inrText_(disc)) : "") +
+        (disc > 0 ? line(sale.offer ? "Discount · " + e(sale.offer) : "Discount", "-" + inrText_(disc)) : "") +
         (showGst ? line("Taxable value", inrText_(sale.taxable)) + line("CGST", inrText_(sale.cgst)) + line("SGST", inrText_(sale.sgst)) : "") +
         (sale.round_off ? line("Round off", inrText_(sale.round_off)) : "") +
         line("Grand Total", inrText_(sale.grand_total), "grand") +

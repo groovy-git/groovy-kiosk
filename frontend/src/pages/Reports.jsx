@@ -281,7 +281,7 @@ function Report({ type, d }) {
       <div className="card table-wrap">
         <div className="card-title">
           <h3>{d.totals.bills} bills · {inr(d.totals.total)}</h3>
-          <Csv name={`sales-register-${d.from}-${d.to}`} rows={d.rows} cols={[{ key: "invoice_no", label: "Invoice" }, { key: "date", label: "Date" }, { key: "customer", label: "Customer" }, { key: "phone", label: "Phone" }, { key: "gstin", label: "GSTIN" }, { key: "salesperson", label: "Salesperson" }, { key: "taxable", label: "Taxable" }, { key: "cgst", label: "CGST" }, { key: "sgst", label: "SGST" }, { key: "round_off", label: "Round off" }, { key: "total", label: "Total" }, { key: "refunded", label: "Refunded" }, { key: "status", label: "Status" }]} />
+          <Csv name={`sales-register-${d.from}-${d.to}`} rows={d.rows} cols={[{ key: "invoice_no", label: "Invoice" }, { key: "date", label: "Date" }, { key: "customer", label: "Customer" }, { key: "phone", label: "Phone" }, { key: "gstin", label: "GSTIN" }, { key: "salesperson", label: "Salesperson" }, { key: "taxable", label: "Taxable" }, { key: "cgst", label: "CGST" }, { key: "sgst", label: "SGST" }, { key: "round_off", label: "Round off" }, { key: "total", label: "Total" }, { key: "refunded", label: "Refunded" }, { key: "status", label: "Status" }, { key: "offer", label: "Offer" }]} />
         </div>
         <table className="tbl">
           <thead><tr><th>Bill</th><th>Salesperson</th><th className="num">Taxable</th><th className="num">GST</th><th className="num">Total</th></tr></thead>

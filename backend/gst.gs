@@ -59,6 +59,58 @@ function computeBill_(lines, billDisc, roundToRupee) {
     };
 }
 
+/**
+ * Offers the owner sets up (Settings → Billing → Offers), kept as JSON in the `offers` setting:
+ *   {id, name, type: "pct", pct, active}        e.g. 10% off the bill
+ *   {id, name, type: "buy", buy, pay, active}   e.g. buy 3, pay for 2
+ * Unreadable JSON reads as no offers, so a damaged setting never stops billing.
+ */
+function offersOf_(raw) {
+    try {
+        const v = JSON.parse(raw || "[]");
+        return Array.isArray(v) ? v : [];
+    } catch (e) {
+        return [];
+    }
+}
+
+/**
+ * What an offer takes off a bill, in rupees. The app works it out the same way (offerDiscount in
+ * frontend/src/lib/cart.js) to fill the bill discount; the server works it out again to check it.
+ * @param lines [{price, qty, discount, unit}]  discount = rupees off the whole line
+ *  - % off: that share of the bill after item discounts.
+ *  - Buy X, pay for Y: only pieces count (loose attar, sold by ml, doesn't). For every X pieces the
+ *    cheapest X − Y go free, each at its price after its own line's discount: 6 pieces on "buy 3, pay
+ *    for 2" free the 2 cheapest.
+ */
+function offerDiscount_(offer, lines) {
+    if (!offer) return 0;
+    if (offer.type === "pct") {
+        const base = r2_(lines.reduce((s, l) => {
+            const gross = r2_(num_(l.price) * num_(l.qty));
+            return s + gross - Math.min(r2_(num_(l.discount)), gross);
+        }, 0));
+        return r2_((base * Math.min(Math.max(num_(offer.pct), 0), 100)) / 100);
+    }
+    if (offer.type === "buy") {
+        const buy = Math.floor(num_(offer.buy));
+        const pay = Math.floor(num_(offer.pay));
+        if (!(pay >= 1 && buy > pay)) return 0;
+        const units = [];
+        lines.forEach((l) => {
+            const n = Math.floor(num_(l.qty));
+            if (l.unit !== "pcs" || n <= 0) return;
+            const gross = r2_(num_(l.price) * n);
+            const each = r2_((gross - Math.min(r2_(num_(l.discount)), gross)) / n);
+            for (let i = 0; i < n; i++) units.push(each);
+        });
+        const free = Math.floor(units.length / buy) * (buy - pay);
+        units.sort((a, b) => a - b);
+        return r2_(units.slice(0, free).reduce((s, x) => s + x, 0));
+    }
+    return 0;
+}
+
 // Indian financial year label for a "yyyy-MM-dd..." string → "26-27"
 function fyOf_(dateStr) {
     const y = parseInt(String(dateStr).slice(0, 4), 10);

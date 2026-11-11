@@ -13,6 +13,9 @@ function gstByRate(items) {
   return Object.values(m).sort((a, b) => a.rate - b.rate);
 }
 
+// the discount line names the offer it came from, when there was one
+const discLabel = (sale) => (sale.offer ? "Discount · " + esc(sale.offer) : "Discount");
+
 function savings(d) {
   const mrpTotal = d.items.reduce((s, i) => s + (i.mrp || i.price) * i.qty, 0);
   return Math.max(0, r2(mrpTotal - d.sale.grand_total));
@@ -91,7 +94,7 @@ export function receiptHtml(d, s) {
     ${sale.status === "voided" ? `<div class="c b">*** VOIDED ***</div>` : ""}
     <hr>${rows}<hr>
     <div class="kv"><span>Items total</span><span>${inr(sale.gross)}</span></div>
-    ${sale.item_disc + sale.bill_disc > 0 ? `<div class="kv"><span>Discount</span><span>-${inr(r2(sale.item_disc + sale.bill_disc))}</span></div>` : ""}
+    ${sale.item_disc + sale.bill_disc > 0 ? `<div class="kv"><span>${discLabel(sale)}</span><span>-${inr(r2(sale.item_disc + sale.bill_disc))}</span></div>` : ""}
     ${sale.round_off ? `<div class="kv"><span>Round off</span><span>${sale.round_off > 0 ? "+" : ""}${inr(sale.round_off, { paise: true })}</span></div>` : ""}
     <div class="kv tot"><span>TOTAL</span><span>${inr(sale.grand_total)}</span></div>
     ${pays}
@@ -214,7 +217,7 @@ export function a4InvoiceHtml(d, s) {
   // one table, not three: separate tables size their own columns, which left Grand Total's divider
   // sitting at a different place from the CGST/SGST rows above it
   const totals = `<table class="tot">${line("Items total", inr(sale.gross))}
-      ${disc > 0 ? line("Discount", "-" + inr(disc)) : ""}
+      ${disc > 0 ? line(discLabel(sale), "-" + inr(disc)) : ""}
       ${showGst ? line("Taxable value", inr(sale.taxable, { paise: true })) + line("CGST", inr(sale.cgst, { paise: true })) + line("SGST", inr(sale.sgst, { paise: true })) : ""}
       ${sale.round_off ? line("Round off", inr(sale.round_off, { paise: true })) : ""}
       ${line("Grand Total", inr(sale.grand_total), "grand")}
@@ -315,7 +318,7 @@ export function billText(d, s) {
     "",
     ...lines,
     "",
-    disc > 0 ? `Discount: -${inr(disc)}` : "",
+    disc > 0 ? `Discount${sale.offer ? ` (${sale.offer})` : ""}: -${inr(disc)}` : "",
     `*Total: ${inr(sale.grand_total)}*${showGst ? " (incl. GST)" : ""}`,
     pays ? `Paid: ${pays}` : "",
     saved > 0 ? `You saved ${inr(saved)} on MRP! 🎉` : "",

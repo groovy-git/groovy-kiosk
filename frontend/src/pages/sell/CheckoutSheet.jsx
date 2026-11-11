@@ -3,9 +3,9 @@ import { Plus, X, UserCheck, Building2 } from "lucide-react";
 import { useApp } from "../../store";
 import { api } from "../../lib/api";
 import { runBusy } from "../../lib/busy";
-import { newClientRef } from "../../lib/cart";
+import { newClientRef, offerAllowance, offerDiscount, offerFill, offersOf } from "../../lib/cart";
 import { inr, r2, METHOD_LABEL, isMaskedPhone } from "../../lib/format";
-import { Button, Field, MoneyInput, Seg, Sheet, Spinner } from "../../components/ui";
+import { Button, Chips, Field, MoneyInput, Seg, Sheet, Spinner } from "../../components/ui";
 
 const METHODS = ["upi", "cash", "card"]; // UPI first: most customers pay that way
 
@@ -36,11 +36,35 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   // a branch without GST bills with none — no choice to offer (the server records such bills at 0% GST)
   const branchNoGst = !!(branch && branch.gst_off);
 
+  // the owner's offers that are switched on (Settings → Billing → Offers); one can be picked for this bill
+  const offers = useMemo(() => offersOf(settings).filter((o) => o.active !== false), [settings]);
+  const offer = offers.find((o) => o.id === cart.offer_id) || null;
+  const offerLines = useMemo(
+    () =>
+      cart.lines
+        .map((l) => {
+          const it = catalog.byVariant.get(l.variant_id);
+          return it ? { price: it.price, qty: l.qty, discount: l.discount || 0, unit: it.unit } : null;
+        })
+        .filter(Boolean),
+    [cart.lines, catalog],
+  );
+  const salesperson = role === "salesperson";
+  const cap = Number(settings.salesman_max_disc_pct || 10);
+  const pieces = offerLines.reduce((s, l) => s + (l.unit === "pcs" ? Math.floor(l.qty) : 0), 0);
+  const piecesShort = offer && offer.type === "buy" ? Math.max(0, offer.buy - pieces) : 0;
+
   useEffect(() => {
     if (!open) return;
     setPays([{ method: "upi", amount: String(due), reference: "", auto: true }]);
-    setDiscText(cart.bill_disc ? String(cart.bill_disc) : "");
-    setDiscMode(cart.bill_disc ? "rs" : "pct");
+    // an offer still on its own amount is worked out again (the bill may have changed since); an offer
+    // the owner has since switched off leaves the bill, and its amount stays as a plain discount
+    if (offer && cart.offer_auto) fillOffer(offer);
+    else {
+      setDiscText(cart.bill_disc ? String(cart.bill_disc) : "");
+      setDiscMode(cart.bill_disc ? "rs" : "pct");
+    }
+    if (cart.offer_id && !offer) setCart((c) => ({ ...c, offer_id: null, offer_auto: false }));
     setShowGstin(!!cust.gstin);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -51,6 +75,28 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
     const base = r2(preview.gross - preview.item_disc);
     const rs = mode === "pct" ? r2((base * Math.min(n, 100)) / 100) : Math.min(n, base);
     setCart((c) => ({ ...c, bill_disc: rs }));
+  };
+
+  // an offer fills the bill discount: a % offer as that %, buy-and-pay as rupees. For a salesperson it
+  // never goes past what they may give (only matters when items already carry discounts).
+  const fillOffer = (o) => {
+    const full = offerDiscount(o, offerLines);
+    const rs = offerFill(o, offerLines, salesperson, cap);
+    const asPct = o.type === "pct" && rs === full;
+    setDiscMode(asPct ? "pct" : "rs");
+    applyDisc(asPct ? String(o.pct) : rs ? String(rs) : "", asPct ? "pct" : "rs");
+  };
+  const pickOffer = (id) => {
+    const o = offers.find((x) => x.id === id) || null;
+    if (!o && !cart.offer_id) return; // no offer, still none
+    setCart((c) => ({ ...c, offer_id: o ? o.id : null, offer_auto: !!o }));
+    if (o) fillOffer(o);
+    else if (cart.offer_auto) applyDisc("", discMode); // the offer's own amount goes with it; one typed by hand stays
+  };
+  // a discount typed by hand takes over from the offer's own amount; the offer stays on the bill
+  const typeDisc = (text, mode = discMode) => {
+    applyDisc(text, mode);
+    if (cart.offer_auto) setCart((c) => ({ ...c, offer_auto: false }));
   };
 
   // an untouched first payment takes whatever the other rows leave of the bill
@@ -137,6 +183,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
         client_ref: ref,
         lines: cart.lines.filter((l) => catalog.byVariant.has(l.variant_id)).map((l) => ({ variant_id: l.variant_id, qty: l.qty, discount: l.discount || 0 })),
         bill_disc: cart.bill_disc || 0,
+        ...(offer ? { offer_id: offer.id } : {}),
         customer: { phone, name: (cust.name || "").trim(), gstin: showGstin ? (cust.gstin || "").trim().toUpperCase() : "", ...(masked ? { from_sale_id: cust.from_sale_id } : {}) },
         salesman_id: sellerId,
         payments: rows.map((p) => ({ method: p.method, amount: p.amount, reference: p.reference })),
@@ -269,6 +316,17 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
             </select>
           )}
         </Field>
+        {offers.length > 0 && (
+          <div className="field">
+            <label>Offer</label>
+            <Chips value={cart.offer_id || ""} onChange={pickOffer} options={[{ value: "", label: "No offer" }, ...offers.map((o) => ({ value: o.id, label: o.name }))]} />
+            {piecesShort > 0 && (
+              <div className="hint">
+                Add {piecesShort} more {piecesShort === 1 ? "item" : "items"} for {offer.name}
+              </div>
+            )}
+          </div>
+        )}
         <div className="field" style={{ marginBottom: 0 }}>
           <label>Bill discount</label>
           <div className="row">
@@ -277,7 +335,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
                 value={discMode}
                 onChange={(m) => {
                   setDiscMode(m);
-                  applyDisc(discText, m);
+                  typeDisc(discText, m);
                 }}
                 options={[
                   { value: "rs", label: "₹" },
@@ -287,13 +345,15 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
             </div>
             <div className="grow">
               {discMode === "rs" ? (
-                <MoneyInput value={discText} onChange={(v) => applyDisc(v)} />
+                <MoneyInput value={discText} onChange={(v) => typeDisc(v)} />
               ) : (
-                <input className="input" inputMode="decimal" placeholder="0" value={discText} onChange={(e) => applyDisc(e.target.value.replace(/[^\d.]/g, ""))} />
+                <input className="input" inputMode="decimal" placeholder="0" value={discText} onChange={(e) => typeDisc(e.target.value.replace(/[^\d.]/g, ""))} />
               )}
             </div>
           </div>
-          {role === "salesperson" && <div className="hint">Up to {settings.salesman_max_disc_pct || 10}% in total</div>}
+          {role === "salesperson" && (
+            <div className="hint">{offer ? `Up to ${inr(offerAllowance(offer, offerLines, cap))} off this bill with ${offer.name}` : `Up to ${settings.salesman_max_disc_pct || 10}% in total`}</div>
+          )}
         </div>
       </div>
 

@@ -14,7 +14,7 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
 - **Four roles:**
     - **Owner**: everything.
     - **Manager**: stock, returns of any size, expenses, reports.
-    - **Salesperson**: billing, with a discount limit, and returns up to a rupee limit you set.
+    - **Salesperson**: billing, with a discount limit (an offer you have set up can go beyond it), and returns up to a rupee limit you set.
     - **Stock Mover**: sees products and stock at the branches you tick, moves stock between branches and adjusts stock (damage, a corrected count). No billing, and no sales, customers, expenses or reports.
     - Owner, managers and salespeople can all sell, and every bill records who sold it.
     - **Customer numbers are the owner's.** Managers and salespeople see them masked (7709974667 shows as 77XX9XX667) on the Customers screen, on bills, on bills held by someone else and in reports. They cannot add, edit, call, chat with or save a customer to their phone. A number they type at checkout shows in full on that bill's receipt and WhatsApp.
@@ -137,7 +137,7 @@ The app prints an **80 mm receipt** or an **A4 tax invoice** using the phone's o
 
 1. Log in as the owner, then open **More → Settings**:
     - **Shop** tab: enter the GSTIN, address and bill footer.
-    - **Billing** tab: check the **salesperson discount limit**, the **most a salesperson may refund on one bill** (₹2,000 to begin with; 0 means only managers can accept returns), the **return window** and **1 tola = 12 ml**.
+    - **Billing** tab: check the **salesperson discount limit**, the **most a salesperson may refund on one bill** (₹2,000 to begin with; 0 means only managers can accept returns), the **return window** and **1 tola = 12 ml**. Under **Offers**, set up the offers staff can pick at checkout: **% off** (10% off, 20% off) or **Buy X, pay for Y** (buy 3, pay for 2: for every 3 packed items the cheapest is free; loose attar doesn't count). Switch an offer off, change it or delete it at any time; bills already made keep the offer's name. Tap **Save settings** after changing offers.
     - **Categories** tab: confirm the HSN codes and GST rates with your accountant.
     - You can add your own categories (e.g. _Bakhoor_) and hide ones you don't sell. A category can be deleted only if no product uses it.
 2. Go to **More → Staff** and add managers and salespeople, each with their own email and password.
@@ -162,7 +162,7 @@ The app prints an **80 mm receipt** or an **A4 tax invoice** using the phone's o
 
 **Daily use**
 
-- **Sell:** scan or tap items, then **View bill → Checkout**. Enter the customer's mobile number (optional), choose Cash, UPI or Card (tap **Split payment** to combine them), then tap **Complete**. Share the bill on WhatsApp or print it.
+- **Sell:** scan or tap items, then **View bill → Checkout**. Enter the customer's mobile number (optional). To give an offer, tap it under **Offer**: it fills in the **Bill discount**, which you can still change in ₹ or %. A salesperson can give an offer in full even above their discount limit; the hint under the discount shows the most they can give on that bill. Choose Cash, UPI or Card (tap **Split payment** to combine them), then tap **Complete**. Share the bill on WhatsApp or print it.
 - **Customers:** go to **More → Customers** and tap a customer to see their bills. The owner can also call them, chat on WhatsApp, edit them, add a customer by hand, and use **Add to contacts**: it hands the name and number to the phone, and the phone's Contacts app asks you to save (on an iPhone, choose **Contacts** in the share sheet that opens). Once tapped it reads **Added to contacts** on that phone. Managers and salespeople find a customer by name or by the full mobile number; part of a number finds nothing.
 - **End of day:** go to **More → Reports → Day close**. It shows the cash you should have in the drawer and a breakdown by salesperson.
 

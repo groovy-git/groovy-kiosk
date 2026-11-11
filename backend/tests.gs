@@ -68,6 +68,22 @@ function runTests() {
     eq("branch credit note no", creditNoteNo_("GF", "26-27", 1, "KN"), "GFKNC/26-27/0001");
     eq("prefix+code of 4 chars fits 16", invoiceNo_("GF", "26-27", 99999, "KN").length <= 16 && creditNoteNo_("GF", "26-27", 9999, "KN").length <= 16, true);
 
+    // offers
+    const pc = (price, qty, discount) => ({ price, qty, discount: discount || 0, unit: "pcs" });
+    const pct10 = { type: "pct", pct: 10 };
+    const b3p2 = { type: "buy", buy: 3, pay: 2 };
+    eq("offer: 10% of the bill", offerDiscount_(pct10, [pc(1000, 1), pc(500, 2)]), 200);
+    eq("offer: % is of the bill after item discounts", offerDiscount_(pct10, [pc(1000, 1, 100)]), 90);
+    eq("offer: buy 3 pay 2, three items: the cheapest free", offerDiscount_(b3p2, [pc(1000, 1), pc(800, 1), pc(500, 1)]), 500);
+    eq("offer: buy 3 pay 2, two items: nothing", offerDiscount_(b3p2, [pc(1000, 1), pc(500, 1)]), 0);
+    eq("offer: buy 3 pay 2, four items: one free", offerDiscount_(b3p2, [pc(1000, 2), pc(300, 1), pc(200, 1)]), 200);
+    eq("offer: buy 3 pay 2, six items: the two cheapest", offerDiscount_(b3p2, [pc(1000, 1), pc(900, 1), pc(800, 1), pc(300, 1), pc(200, 1), pc(100, 1)]), 300);
+    eq("offer: a line of 3 pieces counts as 3", offerDiscount_(b3p2, [pc(450, 3)]), 450);
+    eq("offer: loose attar (ml) doesn't count", offerDiscount_(b3p2, [pc(1000, 1), pc(800, 1), { price: 25, qty: 30, discount: 0, unit: "ml" }]), 0);
+    eq("offer: a free piece is worth its price after its line discount", offerDiscount_(b3p2, [pc(1000, 1), pc(800, 1), pc(500, 2, 200)]), 400);
+    eq("offer: none", offerDiscount_(null, [pc(1000, 3)]), 0);
+    eq("offers: unreadable setting reads as none", offersOf_("not json").length, 0);
+
     // phone normalisation
     eq("phone +91", normPhone_("+91 98765 43210"), "9876543210");
     eq("phone valid", validPhone_("9876543210"), true);

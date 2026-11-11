@@ -8,7 +8,7 @@ import { NeedBranch } from "../components/Branch";
 import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
 import { searchItems, lookupBarcode, imageUrl } from "../lib/catalog";
 import { PAGE, MIN_SEARCH, useSearchQuery, useMoreOnScroll } from "../lib/listing";
-import { addLine, computeBill, qtyInCart } from "../lib/cart";
+import { addLine, computeBill, offerFill, offersOf, qtyInCart } from "../lib/cart";
 import { beepError, beepOk, unlockAudio } from "../lib/feedback";
 import { inr, initials } from "../lib/format";
 import CartSheet from "./sell/CartSheet";
@@ -18,7 +18,7 @@ import SuccessSheet from "./sell/SuccessSheet";
 import HeldSheet from "./sell/HeldSheet";
 
 export default function Sell() {
-  const { catalog, cart, setCart, settings, toast, isAllBranches } = useApp();
+  const { catalog, cart, setCart, settings, toast, isAllBranches, role } = useApp();
   const [q, setQ] = useState("");
   const query = useSearchQuery(q);
   const [drawn, setDrawn] = useState(PAGE);
@@ -99,11 +99,15 @@ export default function Sell() {
     const lines = cart.lines
       .map((l) => {
         const it = catalog.byVariant.get(l.variant_id);
-        return it ? { ...l, price: it.price, gst_rate: it.gst } : null;
+        return it ? { ...l, price: it.price, gst_rate: it.gst, unit: it.unit } : null;
       })
       .filter(Boolean);
-    return computeBill(lines, Number(cart.bill_disc) || 0, settings.round_off !== "no");
-  }, [cart, catalog, settings.round_off]);
+    // an offer still on its own amount is worked out on the bill as it is now: items added or taken off
+    // after it was picked change what it is worth
+    const offer = cart.offer_auto ? offersOf(settings).find((o) => o.id === cart.offer_id && o.active !== false) : null;
+    const billDisc = offer ? offerFill(offer, lines, role === "salesperson", Number(settings.salesman_max_disc_pct || 10)) : Number(cart.bill_disc) || 0;
+    return computeBill(lines, billDisc, settings.round_off !== "no");
+  }, [cart, catalog, settings, role]);
   const pieces = cart.lines.reduce((s, l) => s + (catalog.byVariant.get(l.variant_id)?.unit === "ml" ? 1 : l.qty), 0);
 
   if (isAllBranches)

@@ -375,7 +375,7 @@ function reportRegister_(p, ctx) {
         .map((s) => ({
             invoice_no: s.invoice_no, date: s.date, customer: s.customer_name || "Walk-in", phone: phoneFor_(s.customer_phone, ctx),
             gstin: s.customer_gstin, salesperson: s.salesman_name, taxable: s.taxable, cgst: s.cgst, sgst: s.sgst,
-            round_off: s.round_off, total: s.grand_total, refunded: s.refunded, status: s.status,
+            round_off: s.round_off, total: s.grand_total, refunded: s.refunded, status: s.status, offer: s.offer || "",
         }));
     const cns = returns
         .filter((r) => inRange_(r.at, from, to))
