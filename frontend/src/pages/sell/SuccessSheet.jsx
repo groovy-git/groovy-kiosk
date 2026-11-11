@@ -1,11 +1,11 @@
 import { Check, MessageCircle, Printer, FileText, Share2, Plus } from "lucide-react";
 import { useApp } from "../../store";
-import { inr, qtyLabel, METHOD_LABEL, isMaskedPhone } from "../../lib/format";
+import { inr, qtyLabel, METHOD_LABEL } from "../../lib/format";
 import { a4InvoiceHtml, billText, printHtml, receiptHtml, whatsappLink } from "../../lib/print";
 import { Sheet } from "../../components/ui";
 
 export default function SuccessSheet({ detail, onClose }) {
-  const { settings, multiBranch } = useApp();
+  const { settings, multiBranch, isAdmin } = useApp();
   if (!detail) return null;
   const shop = { ...settings, multi_branch: multiBranch };
   const s = detail.sale;
@@ -40,8 +40,8 @@ export default function SuccessSheet({ detail, onClose }) {
       )}
       <SaleSummary detail={detail} />
       <div className="grid-2 mt">
-        {/* masked after an exchange of a customer this person doesn't see in full */}
-        {!isMaskedPhone(s.customer_phone) && (
+        {/* sending the customer their bill on WhatsApp is the owner's; staff print or share it */}
+        {isAdmin && (
           <a className="btn wa" href={whatsappLink(s.customer_phone, text)} target="_blank" rel="noreferrer">
             <MessageCircle size={18} /> WhatsApp
           </a>

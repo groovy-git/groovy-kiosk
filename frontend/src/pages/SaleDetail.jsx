@@ -11,7 +11,7 @@ import { Button, Chips, Field, Seg, Sheet, SkeletonList, Stepper } from "../comp
 import { STATUS } from "./Sales";
 
 export default function SaleDetail({ id }) {
-  const { settings, isManager, toast, refreshCatalog, multiBranch, cart, setCart } = useApp();
+  const { settings, isManager, isAdmin, toast, refreshCatalog, multiBranch, cart, setCart } = useApp();
   const shop = { ...settings, multi_branch: multiBranch };
   const [d, setD] = useState(null);
   const [ret, setRet] = useState(null); // "return" | "exchange"
@@ -124,8 +124,8 @@ export default function SaleDetail({ id }) {
         )}
 
         <div className="grid-2 mt">
-          {/* a number sent masked can't be messaged: the customer's WhatsApp is the owner's */}
-          {!isMaskedPhone(s.customer_phone) && (
+          {/* sending the customer their bill on WhatsApp is the owner's; staff print or share it */}
+          {isAdmin && (
             <a className="btn wa" href={whatsappLink(s.customer_phone, text)} target="_blank" rel="noreferrer">
               <MessageCircle size={18} /> WhatsApp
             </a>

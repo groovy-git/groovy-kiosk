@@ -17,7 +17,7 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
     - **Salesperson**: billing, with a discount limit (an offer you have set up can go beyond it), and returns up to a rupee limit you set.
     - **Stock Mover**: sees products and stock at the branches you tick, moves stock between branches and adjusts stock (damage, a corrected count). No billing, and no sales, customers, expenses or reports.
     - Owner, managers and salespeople can all sell, and every bill records who sold it.
-    - **Customer numbers are the owner's.** Managers and salespeople see them masked (7709974667 shows as 77XX9XX667) on the Customers screen, on bills, on bills held by someone else and in reports. They cannot add, edit, call, chat with or save a customer to their phone. A number they type at checkout shows in full on that bill's receipt and WhatsApp.
+    - **Customer numbers are the owner's.** Managers and salespeople see them masked (7709974667 shows as 77XX9XX667) on the Customers screen, on bills, on bills held by someone else and in reports. They cannot add, edit, call, chat with or save a customer to their phone. A number they type at checkout shows in full on that bill's receipt. Only the owner has the WhatsApp button (after a sale and on a bill).
 
 ---
 
@@ -162,7 +162,7 @@ The app prints an **80 mm receipt** or an **A4 tax invoice** using the phone's o
 
 **Daily use**
 
-- **Sell:** scan or tap items, then **View bill → Checkout**. Enter the customer's mobile number (optional). To give an offer, tap it under **Offer**: it fills in the **Bill discount**, which you can still change in ₹ or %. A salesperson can give an offer in full even above their discount limit; the hint under the discount shows the most they can give on that bill. Choose Cash, UPI or Card (tap **Split payment** to combine them), then tap **Complete**. Share the bill on WhatsApp or print it.
+- **Sell:** scan or tap items, then **View bill → Checkout**. Enter the customer's mobile number (optional). To give an offer, tap it under **Offer**: it fills in the **Bill discount**, which you can still change in ₹ or %. A salesperson can give an offer in full even above their discount limit; the hint under the discount shows the most they can give on that bill. Choose Cash, UPI or Card (tap **Split payment** to combine them), then tap **Complete**. Print the bill or share it; the owner can also send it on WhatsApp.
 - **Customers:** go to **More → Customers** and tap a customer to see their bills. The owner can also call them, chat on WhatsApp, edit them, add a customer by hand, and use **Add to contacts**: it hands the name and number to the phone, and the phone's Contacts app asks you to save (on an iPhone, choose **Contacts** in the share sheet that opens). Once tapped it reads **Added to contacts** on that phone. Managers and salespeople find a customer by name or by the full mobile number; part of a number finds nothing.
 - **End of day:** go to **More → Reports → Day close**. It shows the cash you should have in the drawer and a breakdown by salesperson.
 
