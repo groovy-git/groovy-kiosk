@@ -204,9 +204,12 @@ function resetTestData_() {
         delete REQ_CACHE_["Settings"];
         delete REQ_CACHE_.__settings;
 
+        // month totals kept for Reports → Performance belong to the bills just cleared
+        const monthTotals = clearMonthTotals_();
+
         bumpCatalogVersion_();
         log_({ user: { id: 0, name: "Sheet owner" } }, "RESET", "All", "", "Test data cleared (setup kept)");
-        return { cleared, counters: counters.length, stock_reset: variants.length };
+        return { cleared, counters: counters.length, stock_reset: variants.length, month_totals: monthTotals };
     });
     // outside the lock, and here rather than in the menu command, so that "Reset EVERYTHING" —
     // which runs this first — clears the PDFs too

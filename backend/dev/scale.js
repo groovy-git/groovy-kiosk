@@ -225,6 +225,11 @@ api("deleteUser (never sold)", "deleteUser", { id: u.data && u.data.id }, T, B1)
 api("deleteUser (has sales)", "deleteUser", { id: run(`rows_("Users").find(u=>u.email==="sameer@demo.local").id`) }, T, B1);
 api("bootstrap unchanged", "bootstrap", { catalog_version: run(`num_(setting_("catalog_version"),1)`), catalog_branch: B1 }, T, B1);
 api("bootstrap full", "bootstrap", {}, T, B1, (d) => d && { user: d.user, branch_id: d.branch_id, catalog: catSum(d.catalog) });
+// Reports → Performance (last, so every step above compares one for one with an older backend):
+// a year read once, then again with the finished months kept
+api("report performance month", "report", { type: "performance", from: "2026-09-01", to: "2026-09-27" }, T, B1);
+api("report performance 12 months, first", "report", { type: "performance", from: "2025-10-01", to: "2026-09-27" }, T, B1);
+api("report performance 12 months, again", "report", { type: "performance", from: "2025-10-01", to: "2026-09-27" }, T, B1);
 
 // ---- report ----
 console.log("\nstep".padEnd(40), "calls".padStart(6), "cells read".padStart(12), "in lock".padStart(10), "js ms".padStart(7));

@@ -155,7 +155,9 @@ function apiDashboard_(p, ctx) {
     sales.filter((s) => d10_(s.date) >= monthStart).forEach((s) => (mSaleIds[s.id] = true));
     const top = {};
     // the lines of this month's bills, found by their bill numbers instead of reading every line ever
-    saleItemsFor_(Object.keys(mSaleIds).map(Number)).forEach((i) => {
+    // (kept: the month's profit below works from the same lines)
+    const mLines = saleItemsFor_(Object.keys(mSaleIds).map(Number));
+    mLines.forEach((i) => {
         if (!mSaleIds[i.sale_id]) return;
         const q = i.qty - i.returned_qty;
         if (q <= 0) return;
@@ -187,6 +189,9 @@ function apiDashboard_(p, ctx) {
             net: r2_(todayGross - todayReturns),
             avg_bill: tSales.length ? r2_(todayGross / tSales.length) : 0,
             payments: payToday,
+            // counted Google reviews taken today (a salesperson's: their own), from the list read for the leaderboard
+            reviews: reviews.filter((v) => d10_(v.at) === today).length,
+            samples: reviews.filter((v) => d10_(v.at) === today && v.sample).length,
         },
         trend: days.map((d) => ({ date: d, net: r2_(byDay[d]) })),
         top_products: Object.keys(top)
@@ -202,11 +207,14 @@ function apiDashboard_(p, ctx) {
     };
     if (!ctx.branch_id) data.by_branch = branchBreakdown_(sales, returns, today, today, monthStart);
     if (!own) {
-        data.month_expenses = sumBy_(rows_("Expenses").filter((e) => e.date >= monthStart && inBranch_(ctx, e.branch_id)), "amount");
-        data.month_net = r2_(
-            sumBy_(sales.filter((s) => d10_(s.date) >= monthStart), "grand_total") -
-                sumBy_(returns.filter((r) => d10_(r.at) >= monthStart), "total"),
-        );
+        const mSales = sales.filter((s) => d10_(s.date) >= monthStart);
+        const mReturns = returns.filter((r) => d10_(r.at) >= monthStart);
+        data.month_expenses = expensesIn_(ctx, monthStart, today);
+        data.month_net = r2_(sumBy_(mSales, "grand_total") - sumBy_(mReturns, "total"));
+        // the same figure as Reports → Profit for this month; only the month's credit-note lines are new reading
+        data.month_profit = profitOf_(mSales, mReturns, data.month_expenses, mLines).net;
+        data.month_reviews = reviews.length; // the list is this month's counted reviews
+        data.month_samples = reviews.filter((v) => v.sample).length;
     }
     return { data };
 }
@@ -260,6 +268,7 @@ function apiReport_(p, ctx) {
         gst_summary: reportGst_,
         product_sales: reportProducts_,
         profit: reportProfit_,
+        performance: reportPerformance_,
         stock_valuation: reportStock_,
         expenses: reportExpenses_,
         google_reviews: reportReviews_,
@@ -481,37 +490,311 @@ function reportProducts_(p, ctx) {
     return { from, to, group, rows, totals: { amount: sumBy_(rows, "amount"), cost: sumBy_(rows, "cost"), profit: sumBy_(rows, "profit") } };
 }
 
+/**
+ * Profit on these bills and credit notes: revenue without GST, less what the goods cost (a restocked
+ * return gives its cost back; one not restocked stays a loss), less the expenses.
+ *
+ * `saleLines` / `returnLines` are the lines when the caller has already read them (the dashboard has, for
+ * top sellers; Performance reads a whole span once and asks month by month); otherwise they are read
+ * here. Lines of other bills are ignored. Shared by the Profit report, Home and Performance, so all agree.
+ */
+function profitOf_(sales, returns, expenses, saleLines, returnLines) {
+    const ids = indexBy_(sales, "id");
+    let cogs = 0;
+    (saleLines || saleItemsFor_(sales.map((s) => s.id))).forEach((i) => {
+        if (ids[i.sale_id]) cogs += i.unit_cost * i.qty;
+    });
+    const rIds = indexBy_(returns, "id");
+    let retCost = 0;
+    (returnLines || returnItemsFor_(returns.map((r) => r.id))).forEach((ri) => {
+        if (rIds[ri.return_id] && ri.restock) retCost += ri.unit_cost * ri.qty; // non-restocked goods stay a loss
+    });
+    const revenue = r2_(sumBy_(sales, "taxable") - sumBy_(returns, "taxable"));
+    const cost = r2_(cogs - retCost);
+    const gross = r2_(revenue - cost);
+    return { revenue, cost, gross, expenses, net: r2_(gross - expenses) };
+}
+
+function expensesIn_(ctx, from, to) {
+    return sumBy_(rows_("Expenses").filter((e) => e.date >= from && e.date <= to && inBranch_(ctx, e.branch_id)), "amount");
+}
+
 function reportProfit_(p, ctx) {
     const { from, to } = rangeOf_(p);
     const { sales, returns } = scope_(ctx, from, to);
     const rs = sales.filter((s) => inRange_(s.date, from, to));
-    const ids = indexBy_(rs, "id");
-    let cogs = 0;
-    saleItemsFor_(rs.map((s) => s.id)).forEach((i) => {
-        if (ids[i.sale_id]) cogs += i.unit_cost * i.qty;
-    });
     const rets = returns.filter((r) => inRange_(r.at, from, to));
-    const rIds = indexBy_(rets, "id");
-    let retCost = 0;
-    returnItemsFor_(rets.map((r) => r.id)).forEach((ri) => {
-        if (rIds[ri.return_id] && ri.restock) retCost += ri.unit_cost * ri.qty; // non-restocked goods stay a loss
-    });
-    const revenue = r2_(sumBy_(rs, "taxable") - sumBy_(rets, "taxable"));
-    const netCogs = r2_(cogs - retCost);
-    const expenses = sumBy_(rows_("Expenses").filter((e) => e.date >= from && e.date <= to && inBranch_(ctx, e.branch_id)), "amount");
-    const gross = r2_(revenue - netCogs);
+    const pr = profitOf_(rs, rets, expensesIn_(ctx, from, to));
     return {
         from, to,
         sales_incl_gst: sumBy_(rs, "grand_total"),
         returns_incl_gst: sumBy_(rets, "total"),
         gst_collected: r2_(sumBy_(rs, (s) => s.cgst + s.sgst) - sumBy_(rets, "tax")),
-        revenue_ex_gst: revenue,
-        cost_of_goods: netCogs,
-        gross_profit: gross,
-        expenses,
-        net_profit: r2_(gross - expenses),
-        margin_pct: revenue ? r2_((gross / revenue) * 100) : 0,
+        revenue_ex_gst: pr.revenue,
+        cost_of_goods: pr.cost,
+        gross_profit: pr.gross,
+        expenses: pr.expenses,
+        net_profit: pr.net,
+        margin_pct: pr.revenue ? r2_((pr.gross / pr.revenue) * 100) : 0,
     };
+}
+
+/* ---------- Performance: Home's figures for any dates, month by month (owner and managers) ---------- */
+
+// kept month totals in Script Properties: mt1_<branch id, 0 = all>_<yyyy-mm>. A change to what is kept
+// or how it is worked out takes a new prefix, so old values are never read again.
+const MONTH_KEEP_ = "mt1_";
+const MONTH_FIELDS_ = ["bills", "items", "new_customers", "sales", "returns", "gst", "revenue", "cost"];
+// how far back months are kept: the most a report can show (24 months, this one included). The store is
+// shared with the app's own settings and capped by Google, so older ones are let go.
+const MONTH_KEEP_SPAN_ = 24;
+
+// "yyyy-mm" n months before ym
+function monthsBefore_(ym, n) {
+    const k = Number(ym.slice(0, 4)) * 12 + Number(ym.slice(5, 7)) - 1 - n;
+    return Math.floor(k / 12) + "-" + pad_((k % 12) + 1, 2);
+}
+
+function monthEnd_(ym) {
+    const y = Number(ym.slice(0, 4));
+    const m = Number(ym.slice(5, 7));
+    return ym + "-" + pad_(new Date(Date.UTC(y, m, 0)).getUTCDate(), 2);
+}
+
+function nextMonth_(ym) {
+    const y = Number(ym.slice(0, 4));
+    const m = Number(ym.slice(5, 7));
+    return m === 12 ? y + 1 + "-01" : y + "-" + pad_(m + 1, 2);
+}
+
+/**
+ * The calendar months between from and to, each cut to the range. A month can be kept once it is whole
+ * and over by more than a day: nothing in the app changes an older bill's month after that (a void is
+ * same-day only, a return counts on the day it is made, a request can't date a bill — fromPhone_), and
+ * the spare day covers a bill saved across midnight. Only the last MONTH_KEEP_SPAN_ months are kept.
+ */
+function monthPieces_(from, to) {
+    const settled = daysAgoStr_(1);
+    const oldest = oldestKeptMonth_();
+    const out = [];
+    for (let m = from.slice(0, 7); m <= to.slice(0, 7); m = nextMonth_(m)) {
+        const first = m + "-01";
+        const last = monthEnd_(m);
+        const pFrom = from > first ? from : first;
+        const pTo = to < last ? to : last;
+        const whole = pFrom === first && pTo === last;
+        out.push({ month: m, from: pFrom, to: pTo, partial: !whole, keep: whole && last < settled && m >= oldest });
+    }
+    return out;
+}
+
+function oldestKeptMonth_() {
+    return monthsBefore_(todayStr_().slice(0, 7), MONTH_KEEP_SPAN_ - 1);
+}
+
+/**
+ * The sales side of each month from `from` to `to`: one read of the bills, their lines and credit notes
+ * for the whole span, then sorted into months. Expenses are not in here; they can be backdated, so they
+ * are always added fresh (reportPerformance_).
+ */
+function monthFigures_(ctx, from, to) {
+    const { sales, returns } = scope_(ctx, from, to);
+    const rs = sales.filter((s) => inRange_(s.date, from, to));
+    const rets = returns.filter((r) => inRange_(r.at, from, to));
+    const saleLines = saleItemsFor_(rs.map((s) => s.id));
+    const returnLines = returnItemsFor_(rets.map((r) => r.id));
+    const first = firstBillByCustomer_();
+    // each bill, credit note and line into its month, in one pass
+    const by = {};
+    const bucket = (m) => (by[m] = by[m] || { sales: [], returns: [], saleLines: [], returnLines: [] });
+    const saleMonth = {};
+    const returnMonth = {};
+    rs.forEach((s) => bucket((saleMonth[s.id] = d10_(s.date).slice(0, 7))).sales.push(s));
+    rets.forEach((r) => bucket((returnMonth[r.id] = d10_(r.at).slice(0, 7))).returns.push(r));
+    saleLines.forEach((i) => saleMonth[i.sale_id] && by[saleMonth[i.sale_id]].saleLines.push(i));
+    returnLines.forEach((i) => returnMonth[i.return_id] && by[returnMonth[i.return_id]].returnLines.push(i));
+    const out = {};
+    Object.keys(by).forEach((m) => {
+        const b = by[m];
+        const pr = profitOf_(b.sales, b.returns, 0, b.saleLines, b.returnLines);
+        out[m] = {
+            bills: b.sales.length,
+            items: itemsOf_(b.sales),
+            new_customers: b.sales.filter((s) => isNewCustomer_(s, first)).length,
+            sales: sumBy_(b.sales, "grand_total"),
+            returns: sumBy_(b.returns, "total"),
+            gst: r2_(sumBy_(b.sales, (s) => s.cgst + s.sgst) - sumBy_(b.returns, "tax")),
+            revenue: pr.revenue,
+            cost: pr.cost,
+            // the month's leaderboard, kept short: [id, name, bills, items, new customers, sales, returns].
+            // Google reviews are not in it — they are counted fresh (one can be marked "Doesn't count" later)
+            people: leaderboard_(b.sales, b.returns, null, null, []).map((r) => [r.salesman_id, r.name, r.bills, r.items, r.new_customers, r.sales, r.returns]),
+        };
+    });
+    return out;
+}
+
+// the leaderboard for the whole range: each month's people added up (the latest month's name wins), then the
+// counted Google reviews; rows shaped like leaderboard_'s, so Reports → Salespeople and this agree
+function performancePeople_(monthsPeople, reviews) {
+    const m = {};
+    const row = (id, name) =>
+        (m[id] = m[id] || { salesman_id: id, name: name || "", bills: 0, items: 0, new_customers: 0, sales: 0, returns: 0, reviews: 0, samples: 0 });
+    monthsPeople.forEach((list) =>
+        list.forEach((x) => {
+            const r = row(x[0], x[1]);
+            if (x[1]) r.name = x[1];
+            r.bills += x[2];
+            r.items = r3_(r.items + x[3]);
+            r.new_customers += x[4];
+            r.sales = r2_(r.sales + x[5]);
+            r.returns = r2_(r.returns + x[6]);
+        }),
+    );
+    reviews.forEach((v) => {
+        const r = row(v.salesman_id, v.salesman_name);
+        r.reviews++;
+        if (v.sample) r.samples++;
+    });
+    return Object.keys(m)
+        .map((k) => {
+            const r = m[k];
+            r.net = r2_(r.sales - r.returns);
+            r.avg_bill = r.bills ? r2_(r.sales / r.bills) : 0;
+            return r;
+        })
+        .sort((a, b) => b.net - a.net);
+}
+
+// what every month and the total show, worked out the same way as profitOf_
+function performanceRow_(f, expenses) {
+    const gross = r2_(f.revenue - f.cost);
+    return Object.assign({}, f, {
+        expenses,
+        net: r2_(f.sales - f.returns),
+        avg_bill: f.bills ? r2_(f.sales / f.bills) : 0,
+        gross,
+        profit: r2_(gross - expenses),
+        margin: f.revenue ? r2_((gross / f.revenue) * 100) : 0,
+    });
+}
+
+// this view's kept month totals that can be used as they are: { "yyyy-mm": figures }. Marks those pieces
+// `kept`. A value that can't be read, or lacks a field, is simply worked out again.
+function readKeptMonths_(kept, keyOf, pieces) {
+    const figures = {};
+    pieces.forEach((pc) => {
+        const raw = pc.keep && kept[keyOf(pc.month)];
+        if (!raw) return;
+        try {
+            const v = JSON.parse(raw);
+            if (MONTH_FIELDS_.every((k) => typeof v[k] === "number") && Array.isArray(v.people)) {
+                figures[pc.month] = v;
+                pc.kept = true;
+            }
+        } catch (e) {
+            /* worked out again */
+        }
+    });
+    return figures;
+}
+
+/**
+ * Keeps the months just worked out, in one write, and lets go of any kept month (any view) older than
+ * MONTH_KEEP_SPAN_. The store is shared with the app's own settings and capped by Google, so a write that
+ * fails is logged and the report still answers: those months are worked out again next time.
+ */
+function keepMonths_(props, kept, entries) {
+    try {
+        const oldest = oldestKeptMonth_();
+        Object.keys(kept)
+            .filter((k) => k.indexOf(MONTH_KEEP_) === 0 && k.slice(-7) < oldest)
+            .forEach((k) => props.deleteProperty(k));
+        if (Object.keys(entries).length) props.setProperties(entries);
+    } catch (e) {
+        console.error("keepMonths_", e);
+    }
+}
+
+// the range's totals: the months added up (expenses, reviews and the derived figures are added by the caller)
+function sumMonths_(months) {
+    const add = (k) => months.reduce((a, m) => a + m[k], 0);
+    return {
+        bills: add("bills"), items: r3_(add("items")), new_customers: add("new_customers"),
+        sales: r2_(add("sales")), returns: r2_(add("returns")), gst: r2_(add("gst")), revenue: r2_(add("revenue")), cost: r2_(add("cost")),
+    };
+}
+
+function reportPerformance_(p, ctx) {
+    // the whole shop's (or branch's) figures, and they are kept as such: never worked out for one person
+    if (ctx.user.role !== "owner" && ctx.user.role !== "manager") fail_("Access denied");
+    const { from, to } = rangeOf_(p);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) fail_("Pick the dates again");
+    const monthNo = (d) => Number(d.slice(0, 4)) * 12 + Number(d.slice(5, 7));
+    if (monthNo(to) - monthNo(from) + 1 > 24) fail_("Pick at most 24 months");
+    const pieces = monthPieces_(from, to);
+    // only the owner can have the kept months worked out again (after a hand edit of the Google Sheet):
+    // every branch view's are let go, so none of them keeps showing the old figures
+    if (p.recalc && ctx.user.role === "owner") clearMonthTotals_();
+    const props = PropertiesService.getScriptProperties();
+    const kept = props.getProperties();
+    const keyOf = (m) => MONTH_KEEP_ + (ctx.branch_id || 0) + "_" + m;
+    const figures = readKeptMonths_(kept, keyOf, pieces);
+    // the rest, read in as few spans as possible (at most a cut month at each end around kept ones)
+    let run = null;
+    const runs = [];
+    pieces.forEach((pc) => {
+        if (pc.kept) return (run = null);
+        if (run) run.to = pc.to;
+        else runs.push((run = { from: pc.from, to: pc.to }));
+    });
+    runs.forEach((r) => Object.assign(figures, monthFigures_(ctx, r.from, r.to)));
+    // expenses: always fresh, a backdated or edited one shows at once
+    const exp = {};
+    rows_("Expenses").forEach((e) => {
+        if (e.date < from || e.date > to || !inBranch_(ctx, e.branch_id)) return;
+        const m = String(e.date).slice(0, 7);
+        exp[m] = r2_((exp[m] || 0) + e.amount);
+    });
+    // counted Google reviews: always fresh too (the owner can say one doesn't count, months later)
+    const reviews = reviewsIn_(ctx, from, to);
+    const rv = {};
+    reviews.forEach((v) => {
+        const m = d10_(v.at).slice(0, 7);
+        const r = (rv[m] = rv[m] || { reviews: 0, samples: 0 });
+        r.reviews++;
+        if (v.sample) r.samples++;
+    });
+    const zero = { people: [] };
+    MONTH_FIELDS_.forEach((k) => (zero[k] = 0));
+    const toKeep = {};
+    const months = pieces.map((pc) => {
+        const f = Object.assign({}, zero, figures[pc.month] || {});
+        if (pc.keep && !pc.kept) toKeep[keyOf(pc.month)] = JSON.stringify(MONTH_FIELDS_.reduce((o, k) => ((o[k] = f[k]), o), { people: f.people }));
+        const row = Object.assign({ month: pc.month, from: pc.from, to: pc.to, partial: pc.partial }, performanceRow_(f, exp[pc.month] || 0), rv[pc.month] || { reviews: 0, samples: 0 });
+        delete row.people; // the range's leaderboard is sent once, below
+        return row;
+    });
+    keepMonths_(props, kept, toKeep);
+    return {
+        from, to,
+        branch_name: ctx.branch_id ? branchName_(ctx.branch_id) : "All branches",
+        months,
+        totals: Object.assign(performanceRow_(sumMonths_(months), r2_(months.reduce((a, m) => a + m.expenses, 0))), {
+            reviews: reviews.length,
+            samples: reviews.filter((v) => v.sample).length,
+        }),
+        people: performancePeople_(pieces.map((pc) => (figures[pc.month] || zero).people), reviews),
+        kept: pieces.filter((pc) => pc.kept).length,
+    };
+}
+
+// every kept month total (Reset test data, the owner's Recalculate); the next Performance report works them out again
+function clearMonthTotals_() {
+    const props = PropertiesService.getScriptProperties();
+    const keys = Object.keys(props.getProperties()).filter((k) => k.indexOf(MONTH_KEEP_) === 0);
+    keys.forEach((k) => props.deleteProperty(k));
+    return keys.length;
 }
 
 function reportStock_(p, ctx) {

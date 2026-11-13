@@ -191,7 +191,7 @@ function dispatch_(req) {
             // the branch this request works in — checked against the user's allowed branches
             ctx.branch_id = resolveBranch_(ctx.user, req.branch_id);
         }
-        const res = def.fn(req.payload || {}, ctx) || {};
+        const res = def.fn(fromPhone_(req.payload), ctx) || {};
         return {
             success: true,
             message: res.message || "",
@@ -204,6 +204,20 @@ function dispatch_(req) {
         console.error("API " + action + ":", err && err.stack ? err.stack : err);
         return { success: false, code: "SERVER", message: "Something went wrong. Please try again." };
     }
+}
+
+/**
+ * What a request may ask for. Top-level keys starting with "_" are the server's own (a bill's `_at` date,
+ * used only by demo seeding) and are never taken from a phone: otherwise anyone logged in could save a
+ * bill dated in the past. Keys inside lists (an import row's `_row`) are untouched.
+ */
+function fromPhone_(payload) {
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload || {};
+    const out = {};
+    Object.keys(payload).forEach((k) => {
+        if (k.charAt(0) !== "_") out[k] = payload[k];
+    });
+    return out;
 }
 
 function apiBootstrap_(p, ctx) {

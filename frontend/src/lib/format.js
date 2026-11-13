@@ -31,6 +31,12 @@ export function monthStart() {
 // month names written out, so every device reads the same (browsers differ: "Sep" vs "Sept")
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
+// "2026-11" → "Nov 2026"
+export function fmtMonth(ym) {
+  const m = Number(String(ym).slice(5, 7));
+  return m ? `${MONTHS[m - 1]} ${String(ym).slice(0, 4)}` : "";
+}
+
 // day / month / year of an IST timestamp
 function istParts(d) {
   const p = new Intl.DateTimeFormat("en-CA", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(d);

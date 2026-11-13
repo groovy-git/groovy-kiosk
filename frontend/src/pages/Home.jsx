@@ -52,6 +52,9 @@ export default function Home() {
   const payTotal = d ? Object.values(d.today.payments).reduce((a, b) => a + Math.max(0, b), 0) : 0;
   const lb = d ? d.leaderboard[board] : [];
   const lbMax = Math.max(1, ...lb.map((r) => r.net));
+  // whole rupees, as Reports → Profit shows it (+ 0 turns a rounded −0 into 0, so it isn't shown as a loss);
+  // null when the server sent none (salespeople, or a Home saved before this update)
+  const profit = d && typeof d.month_profit === "number" ? Math.round(d.month_profit) + 0 : null;
 
   return (
     <>
@@ -120,6 +123,15 @@ export default function Home() {
                 <div className="label">New customers</div>
                 <div className="value">{d.today.new_customers || 0}</div>
               </div>
+              {/* counted Google reviews taken today (a salesperson: their own); 0 on a Home saved before this update */}
+              <div className="stat">
+                <div className="label">Google reviews</div>
+                <div className="value">{d.today.reviews || 0}</div>
+              </div>
+              <div className="stat">
+                <div className="label">Samples given</div>
+                <div className="value">{d.today.samples || 0}</div>
+              </div>
             </div>
 
             {isAllBranches && d.by_branch && (
@@ -162,6 +174,46 @@ export default function Home() {
                   </div>
                 ))}
               </div>
+            )}
+
+            {isManager && d.month_expenses !== undefined && (
+              <>
+                <div className="section-label">This month</div>
+                <div className="grid-2">
+                  <div className="stat gold">
+                    <div className="label">Net sales</div>
+                    <div className="value">{inr(d.month_net)}</div>
+                  </div>
+                  <div className="stat">
+                    <div className="label">Expenses</div>
+                    <div className="value">{inr(d.month_expenses)}</div>
+                  </div>
+                  {/* the same figure as Reports → Profit for this month; a Home saved before this update has none */}
+                  {profit !== null && (
+                    <div className={"stat" + (profit < 0 ? "" : " brown")} style={{ gridColumn: "1 / -1" }}>
+                      <div className="label">Profit</div>
+                      <div className="value" style={profit < 0 ? { color: "var(--bad)" } : undefined}>
+                        {inr(profit)}
+                      </div>
+                      <div className={"tiny" + (profit < 0 ? " muted" : "")} style={profit < 0 ? undefined : { color: "var(--cream)" }}>
+                        {profit < 0 ? "A loss, after GST, cost of goods and expenses" : "After GST, cost of goods and expenses"}
+                      </div>
+                    </div>
+                  )}
+                  {d.month_reviews !== undefined && (
+                    <>
+                      <div className="stat">
+                        <div className="label">Google reviews</div>
+                        <div className="value">{d.month_reviews}</div>
+                      </div>
+                      <div className="stat">
+                        <div className="label">Samples given</div>
+                        <div className="value">{d.month_samples || 0}</div>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </>
             )}
 
             <div className="card mt">
@@ -252,19 +304,6 @@ export default function Home() {
                     <span className={v.stock_qty <= 0 ? "bad-text bold" : "bold"}>{v.stock_qty <= 0 ? "Out" : v.unit === "ml" ? `${v.stock_qty} ml` : v.stock_qty}</span>
                   </div>
                 ))}
-              </div>
-            )}
-
-            {isManager && d.month_expenses !== undefined && (
-              <div className="grid-2 mt">
-                <div className="stat gold">
-                  <div className="label">Sales this month</div>
-                  <div className="value">{inr(d.month_net)}</div>
-                </div>
-                <div className="stat">
-                  <div className="label">Expenses this month</div>
-                  <div className="value">{inr(d.month_expenses)}</div>
-                </div>
               </div>
             )}
           </>

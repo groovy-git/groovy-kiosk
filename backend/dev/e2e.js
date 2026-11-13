@@ -1914,8 +1914,18 @@ check("clearing the cap from the app is rejected", !capEnv.call("saveSettings", 
 check("a negative cap is rejected", !capEnv.call("saveSettings", { settings: { salesperson_max_return: "-5" } }, CAPT).success);
 ok(capEnv.call("saveSettings", { settings: { salesperson_max_return: "2000" } }, CAPT), "cap set back to ₹2,000");
 
+// a bill from back in January: saved as today, then its date moved in the sheet — a request can't
+// date a bill itself (dispatch_ drops "_" keys, fromPhone_)
+const backdateBill = (env, saleId, at) => {
+    env.ctx.resetReqCache_();
+    const s = env.ctx.rows_("Sales").find((x) => x.id === saleId);
+    s.date = at;
+    env.ctx.updateRows_("Sales", [s]);
+    env.ctx.resetReqCache_();
+};
 // past the window the cap is not the obstacle, and only the owner may override
-const cbOld = capBill("cap-old", 1, { _at: "2026-01-05 11:00:00" });
+const cbOld = capBill("cap-old", 1);
+backdateBill(capEnv, cbOld.sale.id, "2026-01-05 11:00:00");
 const lateSp = capReturn(cbOld, 1, CAPSP);
 check("a late bill tells a salesperson about the window, not the cap", /Return window/.test(lateSp.message) && !/Refund limit/.test(lateSp.message), lateSp.message);
 check("a manager still cannot override a late bill", !capReturn(cbOld, 1, CAPMG, { override: true }).success);
@@ -2068,7 +2078,8 @@ xEnv.call("saveSettings", { settings: { salesperson_max_return: "2000" } }, XT);
 
 // the rules a plain return already has still apply
 const xbOld = xEnv.call("completeSale", { client_ref: "x-old", lines: [{ variant_id: XA, qty: 1 }],
-    payments: [{ method: "cash", amount: 9999 }], _at: "2026-01-07 12:00:00" }, XSP, 1).data;
+    payments: [{ method: "cash", amount: 9999 }] }, XSP, 1).data;
+backdateBill(xEnv, xbOld.sale.id, "2026-01-07 12:00:00");
 const xLate = xSwapOn(xbOld, 1, [{ variant_id: XB, qty: 1 }]);
 check("a bill past the return window cannot be swapped", /Return window/.test(xLate.message), xLate.message);
 check("...unless the owner says so", xEnv.call("exchange", { client_ref: "x-old-ok", sale_id: xbOld.sale.id,
@@ -2896,6 +2907,325 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     const reset = rEnv.ctx.resetTestData_();
     rEnv.ctx.resetReqCache_();
     check("Reset test data clears the reviews too", rEnv.ctx.rows_("Reviews").length === 0, reset);
+}
+
+// ---- Profit this month on Home: the same figure as Reports → Profit, for the owner and managers only ----
+{
+    const pEnv = createEnv();
+    pEnv.ctx.setupSheets();
+    const pPwd = /Password: (\S+)/.exec(pEnv.alerts.pop())[1];
+    const PT = pEnv.call("login", { email: "owner@groovy.test", password: pPwd }).data.token;
+    const pc = (a, p, t, b) => pEnv.call(a, p, t || PT, b === undefined ? 1 : b);
+    const B2 = pc("saveBranch", { name: "Profit Two", code: "PF" }).data.id;
+    const pCat = pc("bootstrap", {}).data.catalog.categories[0].id;
+    // ₹1,180 with 18% GST in it = ₹1,000 without GST; it cost ₹400, so ₹600 profit a piece
+    pc("saveProduct", { name: "Profit Test", category_id: pCat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: 1180, sell_price: 1180, cost: 400, opening_stock: 50, barcode: "PF1" }] });
+    const PV = pc("getCatalog", {}).data.variants.find((v) => v.barcode === "PF1").id;
+    pc("transferStock", { to_branch_id: B2, lines: [{ variant_id: PV, qty: 5 }] });
+    pc("saveUser", { name: "Profit Mgr", email: "pf-mgr@x.in", role: "manager", password: "shop-pass-2", branch_id: 1 });
+    pc("saveUser", { name: "Profit Sp", email: "pf-sp@x.in", role: "salesperson", password: "shop-pass-1", branch_id: 1, branch_ids: [1] });
+    const PM = pEnv.call("login", { email: "pf-mgr@x.in", password: "shop-pass-2" }).data.token;
+    const PS = pEnv.call("login", { email: "pf-sp@x.in", password: "shop-pass-1" }).data.token;
+    const today = pEnv.ctx.todayStr_();
+    const home = (t, b) => pc("dashboard", {}, t, b).data;
+    const report = (b) => pc("report", { type: "profit", from: today.slice(0, 8) + "01", to: today }, PT, b).data.net_profit;
+    // Home and the report agree, at this branch and for All branches; returns the branch's figure
+    const same = (what, expected) => {
+        const h1 = home(PT, 1).month_profit;
+        const hAll = home(PT, 0).month_profit;
+        check("profit on Home " + what, h1 === expected && h1 === report(1) && hAll === report(0), { h1, expected, report: report(1), hAll, all: report(0) });
+    };
+    let n = 0;
+    const sell = (qty, b, t) => pc("completeSale", { client_ref: "pf-" + ++n, lines: [{ variant_id: PV, qty }], payments: [{ method: "cash", amount: 1180 * qty }] }, t || PT, b).data;
+
+    same("is 0 before any bill", 0);
+    const s3 = sell(3, 1);
+    same("is sales without GST less what they cost", 1800);
+    sell(1, B2);
+    check("...All branches adds the other branch", home(PT, 0).month_profit === 2400 && home(PT, B2).month_profit === 600);
+    pc("saveExpense", { title: "Salary", category: "Salary", amount: 300, method: "cash" });
+    same("takes off the month's expenses", 1500);
+    check("...the expense tile shows the same expenses", home(PT, 1).month_expenses === 300);
+    pc("returnItems", { sale_id: s3.sale.id, items: [{ sale_item_id: s3.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "Wrong size" });
+    same("loses a restocked return's profit only (the bottle is back on the shelf)", 900);
+    pc("returnItems", { sale_id: s3.sale.id, items: [{ sale_item_id: s3.items[0].id, qty: 1, restock: false }], refund_method: "cash", reason: "Leaked" });
+    same("loses the whole price of a return not restocked, and can go below 0", -100);
+    const v = sell(1, 1);
+    pc("voidSale", { id: v.sale.id, reason: "test" });
+    same("leaves out a voided bill", -100);
+    check("a manager sees the same figure", home(PM, 1).month_profit === -100);
+    const sp = home(PS, 1);
+    check("a salesperson's Home has no profit (nor the month's sales and expenses)", sp && !("month_profit" in sp) && !("month_expenses" in sp) && !("month_net" in sp), sp && Object.keys(sp));
+}
+
+// ---- Reports → Performance: Home's figures for any dates, month by month; finished months kept ----
+{
+    const fEnv = createEnv();
+    const X = fEnv.ctx;
+    X.setupSheets();
+    const fPwd = /Password: (\S+)/.exec(fEnv.alerts.pop())[1];
+    const FT = fEnv.call("login", { email: "owner@groovy.test", password: fPwd }).data.token;
+    const fc = (a, p, t, b) => fEnv.call(a, p, t || FT, b === undefined ? 1 : b);
+    const B2 = fc("saveBranch", { name: "Perf Two", code: "PT" }).data.id;
+    const fCat = fc("bootstrap", {}).data.catalog.categories[0].id;
+    // ₹1,180 with 18% GST = ₹1,000 without; cost ₹400
+    fc("saveProduct", { name: "Perf Test", category_id: fCat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: 1180, sell_price: 1180, cost: 400, opening_stock: 60, barcode: "PF2" }] });
+    const FV = fc("getCatalog", {}).data.variants.find((v) => v.barcode === "PF2").id;
+    fc("transferStock", { to_branch_id: B2, lines: [{ variant_id: FV, qty: 5 }] });
+    fc("saveUser", { name: "Perf Mgr", email: "pe-mgr@x.in", role: "manager", password: "shop-pass-2", branch_id: 1 });
+    fc("saveUser", { name: "Perf Sp", email: "pe-sp@x.in", role: "salesperson", password: "shop-pass-1", branch_id: 1, branch_ids: [1] });
+    fc("saveUser", { name: "Perf Mover", email: "pe-mo@x.in", role: "stock_mover", password: "shop-pass-4", branch_id: 1, branch_ids: [1, B2] });
+    const FM = fEnv.call("login", { email: "pe-mgr@x.in", password: "shop-pass-2" }).data.token;
+    const FS = fEnv.call("login", { email: "pe-sp@x.in", password: "shop-pass-1" }).data.token;
+    const FMO = fEnv.call("login", { email: "pe-mo@x.in", password: "shop-pass-4" }).data.token;
+
+    const T0 = X.todayStr_();
+    const ymAgo = (k) => {
+        let y = Number(T0.slice(0, 4));
+        let m = Number(T0.slice(5, 7)) - k;
+        while (m < 1) (m += 12), y--;
+        return y + "-" + String(m).padStart(2, "0");
+    };
+    const M2 = ymAgo(2);
+    const M1 = ymAgo(1);
+    const M0 = ymAgo(0);
+    let n = 0;
+    const sell = (qty, phone, b) =>
+        fc("completeSale", { client_ref: "pe-" + ++n, lines: [{ variant_id: FV, qty }], payments: [{ method: "cash", amount: 1180 * qty }], customer: phone ? { phone } : undefined }, FT, b).data;
+    // bills are made through the app, then moved back to the day they stand for
+    const move = (tab, field, id, at) => {
+        X.resetReqCache_();
+        const row = X.rows_(tab).find((r) => r.id === id);
+        row[field] = at;
+        X.updateRows_(tab, [row]);
+        X.resetReqCache_();
+    };
+    const kc1 = sell(2, "9822200001", 1); // two months ago: a new customer, 2 pieces
+    const walk = sell(1, "", 1); // two months ago: a walk-in
+    // last month: one of the two pieces comes back and goes on the shelf
+    fc("returnItems", { sale_id: kc1.sale.id, items: [{ sale_item_id: kc1.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "Wrong size" });
+    X.resetReqCache_();
+    const retId = X.rows_("Returns").find((r) => r.sale_id === kc1.sale.id).id;
+    const again = sell(1, "9822200001", 1); // last month: the same customer again, so not new
+    const kc2 = sell(1, "9822200002", 1); // last month: a new customer
+    const atB2 = sell(1, "", B2); // last month, at the other branch
+    sell(1, "9822200003", 1); // today: a new customer
+    move("Sales", "date", kc1.sale.id, M2 + "-10 11:00:00");
+    move("Sales", "date", walk.sale.id, M2 + "-11 11:00:00");
+    move("Returns", "at", retId, M1 + "-05 11:00:00");
+    move("Sales", "date", again.sale.id, M1 + "-08 11:00:00");
+    move("Sales", "date", kc2.sale.id, M1 + "-12 11:00:00");
+    move("Sales", "date", atB2.sale.id, M1 + "-12 12:00:00");
+    fc("saveExpense", { title: "Rent", category: "Rent", amount: 500, method: "cash", date: M2 + "-10" });
+    fc("saveExpense", { title: "Salary", category: "Salary", amount: 200, method: "cash", date: M1 + "-15" });
+
+    const perf = (p, t, b) => fc("report", Object.assign({ type: "performance" }, p), t, b);
+    const from3 = M2 + "-01";
+    const keepable = X.monthPieces_(from3, T0).filter((pc) => pc.keep).length;
+    const r1 = perf({ from: from3, to: T0 });
+    const d1 = r1.data;
+    const m = (d, ym) => d && d.months.find((x) => x.month === ym);
+    check("performance: three months, oldest first, this month marked as part of a month when it is",
+        r1.success && d1.months.map((x) => x.month).join() === [M2, M1, M0].join() && !m(d1, M2).partial && !m(d1, M1).partial && m(d1, M0).partial === (T0 !== X.monthEnd_(M0)),
+        r1.message || d1.months.map((x) => [x.month, x.partial]));
+    const m2 = m(d1, M2);
+    check("performance: two months ago = 2 bills, 3 items, 1 new customer, ₹3,000 without GST less ₹1,200 cost less ₹500 rent",
+        m2.bills === 2 && m2.items === 3 && m2.new_customers === 1 && m2.sales === 3540 && m2.revenue === 3000 && m2.cost === 1200 && m2.expenses === 500 && m2.profit === 1300 && m2.avg_bill === 1770, m2);
+    const m1 = m(d1, M1);
+    check("performance: last month = the restocked return taken off (its price and its cost), the returning customer not new",
+        m1.bills === 2 && m1.new_customers === 1 && m1.returns === 1180 && m1.net === 1180 && m1.revenue === 1000 && m1.cost === 400 && m1.expenses === 200 && m1.profit === 400, m1);
+    const t1 = d1.totals;
+    const pr = fc("report", { type: "profit", from: from3, to: T0 }).data;
+    const sm = fc("report", { type: "salesman_performance", from: from3, to: T0 }).data.rows;
+    check("performance totals = Reports → Profit for the same dates",
+        t1.profit === pr.net_profit && t1.revenue === pr.revenue_ex_gst && t1.cost === pr.cost_of_goods && t1.gst === pr.gst_collected && t1.sales === pr.sales_incl_gst && t1.expenses === pr.expenses && t1.margin === pr.margin_pct, { t1, pr });
+    check("...and = Reports → Salespeople for bills, items and new customers (each customer new once)",
+        t1.bills === sm.reduce((a, r) => a + r.bills, 0) && t1.items === sm.reduce((a, r) => a + r.items, 0) && t1.new_customers === 3 && t1.new_customers === sm.reduce((a, r) => a + r.new_customers, 0), { t1, sm });
+    const monthNow = perf({ from: M0 + "-01", to: T0 }).data.totals;
+    const home = fc("dashboard", {}).data;
+    check("performance for this month = Home's This month", monthNow.net === home.month_net && monthNow.expenses === home.month_expenses && monthNow.profit === home.month_profit, { monthNow, home: [home.month_net, home.month_expenses, home.month_profit] });
+
+    // kept months
+    const keys = () => Object.keys(X.PropertiesService.getScriptProperties().getProperties()).filter((k) => k.indexOf("mt1_") === 0);
+    check("performance: the first time nothing is kept yet; the finished months are kept after it", d1.kept === 0 && keys().includes("mt1_1_" + M2) && keys().length === keepable, keys());
+    check("...this month is never kept", !keys().some((k) => k.endsWith("_" + M0)));
+    const r2 = perf({ from: from3, to: T0 }).data;
+    const same = (a, b) => JSON.stringify(Object.assign({}, a, { kept: 0 })) === JSON.stringify(Object.assign({}, b, { kept: 0 }));
+    check("performance: opened again, the finished months come from what was kept, with the same figures", r2.kept === keepable && keepable >= 1 && same(r1.data, r2), { kept: r2.kept, keepable });
+    fc("saveExpense", { title: "Late salary", category: "Salary", amount: 100, method: "cash", date: M2 + "-20" });
+    const r3 = perf({ from: from3, to: T0 }).data;
+    check("...a salary backdated into a kept month shows at once (expenses are never kept)", m(r3, M2).expenses === 600 && m(r3, M2).profit === 1200 && r3.kept === keepable, m(r3, M2));
+    // a hand edit of the Google Sheet: the walk-in bill of two months ago marked voided there
+    move("Sales", "status", walk.sale.id, "voided");
+    check("...a hand edit to a kept month's bill isn't seen until it is worked out again", m(perf({ from: from3, to: T0 }).data, M2).bills === 2);
+    check("...a manager asking to recalculate is ignored", m(perf({ from: from3, to: T0, recalc: 1 }, FM).data, M2).bills === 2);
+    const fixed = perf({ from: from3, to: T0, recalc: 1 }).data;
+    check("...the owner's Recalculate works it out from the bills again, and keeps that", m(fixed, M2).bills === 1 && fixed.kept === 0 && m(perf({ from: from3, to: T0 }).data, M2).bills === 1, m(fixed, M2));
+
+    // branches and cut months
+    const all = perf({ from: from3, to: T0 }, FT, 0).data;
+    check("performance, All branches: the other branch's bill counts, kept under its own key", all.branch_name === "All branches" && m(all, M1).bills === 3 && keys().includes("mt1_0_" + M2));
+    check("...the other branch on its own", m(perf({ from: from3, to: T0 }, FT, B2).data, M1).bills === 1);
+    perf({ from: from3, to: T0, recalc: 1 });
+    check("the owner's Recalculate lets go of every branch view's kept months, not just the one on screen",
+        keys().length > 0 && keys().every((k) => k.indexOf("mt1_1_") === 0) && perf({ from: from3, to: T0 }, FT, 0).data.kept === 0, keys());
+    check("performance: dates that aren't dates are refused", /Pick the dates again/.test(perf({ from: "2026", to: T0 }).message));
+    const cut = perf({ from: M1 + "-10", to: T0 }).data;
+    check("performance: dates that cut a month count only those days, marked, and aren't kept",
+        m(cut, M1).partial && m(cut, M1).from === M1 + "-10" && m(cut, M1).bills === 1 && m(cut, M1).expenses === 200 && cut.kept === 0, m(cut, M1));
+    const head = perf({ from: from3, to: M1 + "-11" }).data;
+    check("...a kept month and a cut one together", m(head, M2).bills === 1 && m(head, M1).bills === 1 && m(head, M1).partial && head.kept === 1, head.months);
+
+    // who
+    const mgr = perf({ from: from3, to: T0 }, FM);
+    check("performance: a manager gets their branch", mgr.success && mgr.data.branch_name === "Main branch" && m(mgr.data, M1).bills === 2, mgr.message);
+    check("performance: a salesperson is refused", /Access denied/.test(perf({ from: from3, to: T0 }, FS).message));
+    check("performance: a stock mover is refused", perf({ from: from3, to: T0 }, FMO, 1).code === "FORBIDDEN");
+    check("performance: more than 24 months is refused", /at most 24 months/.test(perf({ from: ymAgo(26) + "-01", to: T0 }).message));
+
+    // the store is shared and capped: kept months are bounded, written in one go, and a failed write is harmless
+    const gsp = X.PropertiesService.getScriptProperties;
+    let writes = 0;
+    X.PropertiesService.getScriptProperties = () => {
+        const real = gsp();
+        return Object.assign({}, real, {
+            setProperty: (k, v) => (writes++, real.setProperty(k, v)),
+            setProperties: (o) => (writes++, real.setProperties(o)),
+        });
+    };
+    const before = keys().length;
+    const old3 = perf({ from: ymAgo(25) + "-01", to: X.monthEnd_(ymAgo(21)) });
+    check("kept months: only the last 24 are kept (25 and 24 months ago are worked out, not kept)",
+        old3.success && !keys().some((k) => k.endsWith("_" + ymAgo(25)) || k.endsWith("_" + ymAgo(24))) && keys().includes("mt1_1_" + ymAgo(23)) && keys().includes("mt1_1_" + ymAgo(21)), keys());
+    check("...the three new months were kept in one write", writes === 1 && keys().length === before + 3, { writes, before, now: keys().length });
+    gsp().setProperty("mt1_1_" + ymAgo(30), "{}");
+    gsp().setProperty("mt1_0_" + ymAgo(28), "{}");
+    perf({ from: ymAgo(20) + "-01", to: X.monthEnd_(ymAgo(20)) });
+    check("...months older than that are let go the next time something is kept (any view)", !keys().some((k) => k.endsWith("_" + ymAgo(30)) || k.endsWith("_" + ymAgo(28))) && keys().includes("mt1_1_" + ymAgo(20)), keys());
+    X.PropertiesService.getScriptProperties = () => Object.assign({}, gsp(), { setProperties: () => { throw new Error("store full"); } });
+    const full = perf({ from: ymAgo(19) + "-01", to: X.monthEnd_(ymAgo(19)) });
+    X.PropertiesService.getScriptProperties = gsp;
+    check("...a store that can't take more doesn't stop the report; that month is simply not kept", full.success && full.data.months.length === 1 && !keys().includes("mt1_1_" + ymAgo(19)), full.message);
+    check("...and it is kept on the next open", perf({ from: ymAgo(19) + "-01", to: X.monthEnd_(ymAgo(19)) }).success && keys().includes("mt1_1_" + ymAgo(19)));
+
+    X.resetReqCache_();
+    const reset = X.resetTestData_();
+    check("Reset test data clears the kept months", keys().length === 0 && reset.month_totals > 0, reset.month_totals);
+}
+
+// ---- Reports → Performance: the Salespeople leaderboard, = Reports → Salespeople, kept per person ----
+{
+    const lEnv = createEnv();
+    const X = lEnv.ctx;
+    X.setupSheets();
+    const lPwd = /Password: (\S+)/.exec(lEnv.alerts.pop())[1];
+    const LT = lEnv.call("login", { email: "owner@groovy.test", password: lPwd }).data.token;
+    const lc = (a, p, t, b) => lEnv.call(a, p, t || LT, b === undefined ? 1 : b);
+    const B2 = lc("saveBranch", { name: "Board Two", code: "BT" }).data.id;
+    const lCat = lc("bootstrap", {}).data.catalog.categories[0].id;
+    lc("saveProduct", { name: "Board Test", category_id: lCat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: 1180, sell_price: 1180, cost: 400, opening_stock: 60, barcode: "BD1" }] });
+    const LV = lc("getCatalog", {}).data.variants.find((v) => v.barcode === "BD1").id;
+    lc("transferStock", { to_branch_id: B2, lines: [{ variant_id: LV, qty: 5 }] });
+    const mgrId = lc("saveUser", { name: "Board Mgr", email: "bd-mgr@x.in", role: "manager", password: "shop-pass-2", branch_id: 1 }).data.id;
+    const sp1 = lc("saveUser", { name: "Board One", email: "bd-sp1@x.in", role: "salesperson", password: "shop-pass-1", branch_id: 1, branch_ids: [1] }).data.id;
+    const sp2 = lc("saveUser", { name: "Board Two Sp", email: "bd-sp2@x.in", role: "salesperson", password: "shop-pass-3", branch_id: 1, branch_ids: [1, B2] }).data.id;
+    const LM = lEnv.call("login", { email: "bd-mgr@x.in", password: "shop-pass-2" }).data.token;
+
+    const T0 = X.todayStr_();
+    const ymAgo = (k) => {
+        let y = Number(T0.slice(0, 4));
+        let m = Number(T0.slice(5, 7)) - k;
+        while (m < 1) (m += 12), y--;
+        return y + "-" + String(m).padStart(2, "0");
+    };
+    const M2 = ymAgo(2);
+    const M1 = ymAgo(1);
+    let n = 0;
+    const sell = (qty, who, phone, b) =>
+        lc("completeSale", { client_ref: "bd-" + ++n, lines: [{ variant_id: LV, qty }], payments: [{ method: "cash", amount: 1180 * qty }], salesman_id: who, customer: phone ? { phone } : undefined }, LT, b).data;
+    const move = (tab, field, id, at) => {
+        X.resetReqCache_();
+        const row = X.rows_(tab).find((r) => r.id === id);
+        row[field] = at;
+        X.updateRows_(tab, [row]);
+        X.resetReqCache_();
+    };
+    const a1 = sell(2, sp1, "9833300001", 1); // two months ago, Board One, a new customer
+    const w1 = sell(1, 0, "", 1); // two months ago, the owner, a walk-in
+    lc("returnItems", { sale_id: a1.sale.id, items: [{ sale_item_id: a1.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "Wrong size" });
+    X.resetReqCache_();
+    const retId = X.rows_("Returns").find((r) => r.sale_id === a1.sale.id).id;
+    const a2 = sell(1, sp1, "9833300001", 1); // last month, Board One, the same customer
+    const b1 = sell(1, sp2, "9833300002", 1); // last month, Board Two Sp, a new customer
+    const b2 = sell(1, sp2, "", B2); // last month, Board Two Sp at the other branch
+    sell(1, sp1, "9833300003", 1); // today, Board One
+    const rv = lc("addReview", { phone: "9833300009", sample: true, salesman_id: sp2 }).data; // a review by Board Two Sp
+    const rvM = lc("addReview", { phone: "9833300008" }, LM).data; // the manager took one, and sold nothing
+    move("Sales", "date", a1.sale.id, M2 + "-10 11:00:00");
+    move("Sales", "date", w1.sale.id, M2 + "-11 11:00:00");
+    move("Returns", "at", retId, M1 + "-05 11:00:00");
+    move("Sales", "date", a2.sale.id, M1 + "-08 11:00:00");
+    move("Sales", "date", b1.sale.id, M1 + "-12 11:00:00");
+    move("Sales", "date", b2.sale.id, M1 + "-12 12:00:00");
+    move("Reviews", "at", rv.id, M2 + "-15 12:00:00");
+    move("Reviews", "at", rvM.id, M1 + "-20 12:00:00");
+
+    const range = { from: M2 + "-01", to: T0 };
+    const perf = (t, b) => lc("report", Object.assign({ type: "performance" }, range), t, b).data;
+    const board = (t, b) => lc("report", Object.assign({ type: "salesman_performance" }, range), t, b).data.rows;
+    const F = ["bills", "items", "new_customers", "sales", "returns", "net", "avg_bill", "reviews", "samples"];
+    const sameAs = (people, rows) =>
+        people.length === rows.length && rows.every((r) => { const q = people.find((x) => x.salesman_id === r.salesman_id); return q && q.name === r.name && F.every((k) => q[k] === r[k]); });
+    const who = (people, id) => people.find((x) => x.salesman_id === id);
+    const p1 = perf();
+    check("leaderboard in Performance = Reports → Salespeople for the same dates, person by person", sameAs(p1.people, board()) && p1.people.length === 4, { perf: p1.people, board: board() });
+    check("...ranked by net sales", p1.people.every((x, i, a) => !i || a[i - 1].net >= x.net), p1.people.map((x) => x.net));
+    check("...the return taken off the one whose bill it was; new customers once each", who(p1.people, sp1).returns === 1180 && who(p1.people, sp1).new_customers === 2 && who(p1.people, sp1).bills === 3, who(p1.people, sp1));
+    check("...someone who only took a Google review is listed", who(p1.people, mgrId) && who(p1.people, mgrId).bills === 0 && who(p1.people, mgrId).reviews === 1, who(p1.people, mgrId));
+    const p2 = perf();
+    check("opened again: the finished months' people come from what was kept, the same leaderboard", p2.kept >= 1 && JSON.stringify(p2.people) === JSON.stringify(p1.people), p2.kept);
+    const keptM2 = JSON.parse(X.PropertiesService.getScriptProperties().getProperty("mt1_1_" + M2));
+    check("...kept per person: [id, name, bills, items, new customers, sales, returns]", Array.isArray(keptM2.people) && keptM2.people.some((x) => x[0] === sp1 && x[2] === 1 && x[5] === 2360), keptM2.people);
+    lc("setReviewCounted", { id: rv.id, counted: false });
+    const p3 = perf();
+    check("a kept month's review marked 'Doesn't count' leaves the leaderboard at once (reviews are never kept)", who(p3.people, sp2).reviews === 0 && who(p3.people, sp2).samples === 0 && p3.kept === p2.kept && sameAs(p3.people, board()), who(p3.people, sp2));
+    // a month kept before the leaderboard was added (no people in it) is worked out again
+    X.PropertiesService.getScriptProperties().setProperty("mt1_1_" + M2, JSON.stringify(Object.assign({}, keptM2, { people: undefined })));
+    const p4 = perf();
+    check("...a kept month without people is worked out again, and kept with them", p4.kept === p2.kept - 1 && sameAs(p4.people, board()) && Array.isArray(JSON.parse(X.PropertiesService.getScriptProperties().getProperty("mt1_1_" + M2)).people), p4.kept);
+    check("a manager's leaderboard is their branch's: the other branch's bill isn't in it", who(perf(LM).people, sp2).bills === 1 && sameAs(perf(LM).people, board(LM)));
+    const allP = perf(LT, 0);
+    check("All branches: everyone, every branch, = Reports → Salespeople for All branches", who(allP.people, sp2).bills === 2 && sameAs(allP.people, board(LT, 0)), who(allP.people, sp2));
+
+    // Google reviews tiles: Home today and this month, Performance's totals and months
+    const sp1Tok = lEnv.call("login", { email: "bd-sp1@x.in", password: "shop-pass-1" }).data.token;
+    const t1 = lc("addReview", { phone: "9833300007", sample: true, salesman_id: sp1 }).data; // today, Board One, a sample given
+    lc("addReview", { phone: "9833300006", salesman_id: sp2 }); // today, Board Two Sp
+    const sumOf = (rows, k) => rows.reduce((a, r) => a + (r[k] || 0), 0);
+    const dash = lc("dashboard", {}).data;
+    check("Home today: Google reviews and samples = the Today leaderboard's; last month's review isn't in it",
+        dash.today.reviews === 2 && dash.today.samples === 1 && dash.today.reviews === sumOf(dash.leaderboard.today, "reviews") && dash.today.samples === sumOf(dash.leaderboard.today, "samples"), dash.today);
+    check("Home this month: = the This month leaderboard's",
+        dash.month_reviews === 2 && dash.month_samples === 1 && dash.month_reviews === sumOf(dash.leaderboard.month, "reviews") && dash.month_samples === sumOf(dash.leaderboard.month, "samples"), [dash.month_reviews, dash.month_samples]);
+    const spDash = lc("dashboard", {}, sp1Tok).data;
+    check("a salesperson's Home: today's reviews are their own, and no month figures", spDash.today.reviews === 1 && spDash.today.samples === 1 && !("month_reviews" in spDash), spDash.today);
+    const pr = perf();
+    const gr = lc("report", Object.assign({ type: "google_reviews" }, range)).data.totals;
+    check("Performance: Google reviews and samples = Reports → Google reviews (counted) for the same dates, and = the leaderboard's",
+        pr.totals.reviews === gr.reviews && pr.totals.samples === gr.samples && pr.totals.reviews === sumOf(pr.people, "reviews") && pr.totals.reviews === 3, { perf: [pr.totals.reviews, pr.totals.samples], report: gr });
+    check("...the months add up to it", sumOf(pr.months, "reviews") === pr.totals.reviews && sumOf(pr.months, "samples") === pr.totals.samples, pr.months.map((x) => [x.month, x.reviews, x.samples]));
+    lc("setReviewCounted", { id: t1.id, counted: false });
+    const pr2 = perf();
+    check("...'Doesn't count' takes it out at once, on Home too", pr2.totals.reviews === pr.totals.reviews - 1 && pr2.totals.samples === pr.totals.samples - 1 && lc("dashboard", {}).data.today.reviews === 1);
+    check("...a manager's is their branch's", perf(LM).totals.reviews === lc("report", Object.assign({ type: "google_reviews" }, range), LM).data.totals.reviews);
+
+    // a request can't date a bill (dispatch_ drops "_" keys): otherwise a bill could land in a kept month
+    const dated = lc("completeSale", { client_ref: "bd-at", lines: [{ variant_id: LV, qty: 1 }], payments: [{ method: "cash", amount: 1180 }], _at: M2 + "-03 10:00:00" }, sp1Tok).data;
+    check("a salesperson's sale sent with a past _at is dated now", dated && dated.sale.date.slice(0, 10) === T0, dated && dated.sale.date);
+    const swap = lc("exchange", { client_ref: "bd-ex", sale_id: dated.sale.id, items: [{ sale_item_id: dated.items[0].id, qty: 1, restock: true }], reason: "Wrong size",
+        lines: [{ variant_id: LV, qty: 1 }], payments: [], refund_method: "cash", _at: M2 + "-03 10:00:00" }, sp1Tok);
+    check("...and so is an exchange's new bill", swap.success && swap.data.sale.date.slice(0, 10) === T0, swap.message || swap.data.sale.date);
+    check("...so the kept months are as they were", perf().months.find((x) => x.month === M2).bills === p1.months.find((x) => x.month === M2).bills);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

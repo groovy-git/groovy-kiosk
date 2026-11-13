@@ -3,7 +3,7 @@ import { Download, Trophy, Mail } from "lucide-react";
 import { useApp } from "../store";
 import { api } from "../lib/api";
 import { useCachedFetch } from "../lib/cached";
-import { inr, istDate, monthStart, fmtDate, fmtDateTime, METHOD_LABEL, r2, plural } from "../lib/format";
+import { inr, istDate, monthStart, fmtDate, fmtDateTime, fmtMonth, METHOD_LABEL, r2, plural } from "../lib/format";
 import { toCSV, downloadText } from "../lib/files";
 import TopBar, { Updating } from "../components/TopBar";
 import { Button, Chips, DateField, Seg, SkeletonList } from "../components/ui";
@@ -11,6 +11,7 @@ import { Button, Chips, DateField, Seg, SkeletonList } from "../components/ui";
 const TYPES = [
   { value: "day_close", label: "Day close", all: true },
   { value: "salesman_performance", label: "Salespeople", all: true },
+  { value: "performance", label: "Performance" },
   { value: "profit", label: "Profit" },
   { value: "gst_summary", label: "GST" },
   { value: "product_sales", label: "Best sellers" },
@@ -27,6 +28,28 @@ const RANGES = [
   { value: "custom", label: "Pick dates" },
 ];
 
+// the 1st of the month n−1 months before this one (n = 1: this month), and the last day of last month
+const monthsBack = (n) => {
+  let [y, m] = istDate().split("-").map(Number);
+  m -= n - 1;
+  while (m < 1) (m += 12), y--;
+  return `${y}-${String(m).padStart(2, "0")}-01`;
+};
+const lastMonthEnd = () => {
+  const [y, m] = istDate().split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, 0)).toISOString().slice(0, 10);
+};
+
+// Performance compares months, so its quick ranges are whole months up to today
+const PERF_RANGES = [
+  { value: "month", label: "This month", r: () => [monthStart(), istDate()] },
+  { value: "last_month", label: "Last month", r: () => [monthsBack(2), lastMonthEnd()] },
+  { value: "3m", label: "3 months", r: () => [monthsBack(3), istDate()] },
+  { value: "6m", label: "6 months", r: () => [monthsBack(6), istDate()] },
+  { value: "12m", label: "12 months", r: () => [monthsBack(12), istDate()] },
+  { value: "custom", label: "Pick dates" },
+];
+
 export default function Reports() {
   const { isManager, toast } = useApp();
   const types = TYPES.filter((t) => isManager || t.all);
@@ -35,7 +58,16 @@ export default function Reports() {
   const [custom, setCustom] = useState({ from: monthStart(), to: istDate() });
   const [date, setDate] = useState(istDate());
   const [group, setGroup] = useState("variant");
-  const [from, to] = range === "custom" ? [custom.from, custom.to] : RANGES.find((x) => x.value === range).r();
+  // a range only one list has (7 days, 12 months…) falls back to This month in the other
+  const ranges = type === "performance" ? PERF_RANGES : RANGES;
+  const rng = ranges.find((x) => x.value === range) || ranges.find((x) => x.value === "month");
+  const [from, to] = rng.value === "custom" ? [custom.from, custom.to] : rng.r();
+  // Performance: a tapped month becomes the range, so its own figures show at the top
+  const showMonth = (m) => {
+    setCustom({ from: m.from, to: m.to });
+    setRange("custom");
+    window.scrollTo(0, 0);
+  };
 
   // the same report with the same dates paints from last time, then refreshes
   const { data: report, loading, reload } = useCachedFetch(
@@ -62,8 +94,8 @@ export default function Reports() {
         )}
         {needsRange && (
           <div className="mt">
-            <Chips value={range} onChange={setRange} options={RANGES} />
-            {range === "custom" && (
+            <Chips value={rng.value} onChange={setRange} options={ranges} />
+            {rng.value === "custom" && (
               <div className="grid-2">
                 <DateField value={custom.from} max={custom.to} onChange={(e) => setCustom({ ...custom, from: e.target.value })} aria-label="From" />
                 <DateField value={custom.to} min={custom.from} max={istDate()} onChange={(e) => setCustom({ ...custom, to: e.target.value })} aria-label="To" />
@@ -76,7 +108,7 @@ export default function Reports() {
             <Seg value={group} onChange={setGroup} options={[{ value: "variant", label: "Item" }, { value: "brand", label: "Brand" }, { value: "category", label: "Category" }]} />
           </div>
         )}
-        <div className="mt">{!data || data.type !== type ? <SkeletonList rows={4} height={70} /> : data.error ? null : <Report type={type} d={data.d} reload={reload} />}</div>
+        <div className="mt">{!data || data.type !== type ? <SkeletonList rows={4} height={70} /> : data.error ? null : <Report type={type} d={data.d} reload={reload} onMonth={showMonth} />}</div>
       </div>
     </>
   );
@@ -129,8 +161,9 @@ const Stat = ({ label, value, cls = "" }) => (
   </div>
 );
 
-function Report({ type, d, reload }) {
+function Report({ type, d, reload, onMonth }) {
   if (type === "google_reviews") return <ReviewsReport d={d} reload={reload} />;
+  if (type === "performance") return <PerformanceReport d={d} reload={reload} onMonth={onMonth} />;
   if (type === "day_close") {
     const expected = d.expected_cash;
     return (
@@ -400,6 +433,224 @@ function SalesmenTable({ rows, title, full, csv }) {
             ))}
           </tbody>
         </table>
+      )}
+    </div>
+  );
+}
+
+// Performance (owner and managers): Home's figures for any dates, then one chosen value month by month.
+// The owner shares it as a screenshot, so the branch and the dates sit at the top.
+const PERF_VALUES = [
+  { value: "profit", label: "Profit", money: true },
+  { value: "net", label: "Net sales", money: true },
+  { value: "bills", label: "Bills" },
+  { value: "avg_bill", label: "Average bill", money: true },
+  { value: "items", label: "Items sold" },
+  { value: "new_customers", label: "New customers" },
+  { value: "expenses", label: "Expenses", money: true, upIsBad: true },
+  { value: "returns", label: "Returns", money: true, upIsBad: true },
+  { value: "reviews", label: "Google reviews" },
+];
+const count = (n) => Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
+// whole rupees; + 0 turns a rounded −0 into 0, so a few paise below zero isn't shown as a loss
+const rupees = (n) => inr(Math.round(n) + 0);
+
+function PerformanceReport({ d, reload, onMonth }) {
+  const { isAdmin, toast } = useApp();
+  const [pick, setPick] = useState("profit");
+  const [busy, setBusy] = useState(false);
+  const t = d.totals;
+  const months = d.months || [];
+  const metric = PERF_VALUES.find((v) => v.value === pick);
+  const show = (v) => (metric.money ? rupees(v) : count(v));
+  const red = (v) => (Math.round(v) < 0 ? { color: "var(--bad)" } : undefined);
+  const loss = Math.round(t.profit) < 0;
+  // a month that isn't whole (this month so far, or cut by the dates picked) says which days it covers
+  const daysOf = (m) => `${Number(m.from.slice(8))}–${Number(m.to.slice(8))} ${fmtMonth(m.month).slice(0, 3)}${m.to === istDate() ? ", so far" : ""}`;
+  // ▲/▼ against the month before, only between whole months (a part month against a whole one says nothing)
+  const change = (m, prev) => {
+    if (!prev || m.partial || prev.partial || !prev[pick]) return null;
+    const pct = Math.round(((m[pick] - prev[pick]) / Math.abs(prev[pick])) * 100);
+    if (!pct) return <span className="muted">same</span>;
+    const up = pct > 0;
+    return <span className={up !== !!metric.upIsBad ? "ok-text" : "bad-text"}>{up ? "▲" : "▼"} {Math.abs(pct)}%</span>;
+  };
+  const recalc = async () => {
+    setBusy(true);
+    try {
+      await api("report", { type: "performance", from: d.from, to: d.to, recalc: 1 });
+      toast("Worked out again from the bills", "success");
+      reload();
+    } catch (e) {
+      toast(e.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <>
+      <div className="row between wrap mb" style={{ gap: 4 }}>
+        <b>{d.branch_name}</b>
+        <span className="small muted">{d.from === d.to ? fmtDate(d.from) : `${fmtDate(d.from)} – ${fmtDate(d.to)}`}</span>
+      </div>
+      <div className="grid-2">
+        <Stat cls="gold" label="Net sales" value={inr(t.net)} />
+        <div className={"stat" + (loss ? "" : " brown")}>
+          <div className="label">Profit</div>
+          <div className="value" style={red(t.profit)}>{rupees(t.profit)}</div>
+        </div>
+        <Stat label="Bills" value={count(t.bills)} />
+        <Stat label="Average bill" value={rupees(t.avg_bill)} />
+        <Stat label="Returns" value={inr(t.returns)} />
+        <Stat label="Items sold" value={count(t.items)} />
+        <Stat label="New customers" value={count(t.new_customers)} />
+        <Stat label="Expenses" value={inr(t.expenses)} />
+        <Stat label="Google reviews" value={count(t.reviews)} />
+        <Stat label="Samples given" value={count(t.samples)} />
+      </div>
+
+      {d.people && <BoardCard rows={d.people} />}
+
+      {months.length > 1 && (
+        <div className="card mt">
+          <div className="card-title"><h3>Month by month</h3></div>
+          <Chips value={pick} onChange={setPick} options={PERF_VALUES} />
+          <MonthBars key={d.from + d.to} months={months} pick={pick} show={show} daysOf={daysOf} />
+          <div className="mt">
+            {months
+              .map((m, i) => ({ m, prev: months[i - 1] }))
+              .reverse()
+              .map(({ m, prev }) => (
+                <button key={m.month} className="list-item" style={{ minHeight: 0, padding: "10px 2px" }} onClick={() => onMonth(m)}>
+                  <div className="grow">
+                    <div className="title">{fmtMonth(m.month)}</div>
+                    {m.partial && <div className="sub">{daysOf(m)}</div>}
+                  </div>
+                  <div className="right">
+                    <b className="money" style={pick === "profit" ? red(m.profit) : undefined}>{show(m[pick])}</b>
+                    <div className="tiny">{change(m, prev)}</div>
+                  </div>
+                </button>
+              ))}
+          </div>
+          <div className="tiny muted mt">Tap a month to see all its figures.</div>
+        </div>
+      )}
+
+      <div className="card mt">
+        <div className="card-title"><h3>How profit is worked out</h3></div>
+        <div className="kv small"><span className="k">Sales (incl. GST)</span><span>{inr(t.sales)}</span></div>
+        <div className="kv small"><span className="k">Returns (incl. GST)</span><span>{inr(-t.returns)}</span></div>
+        <div className="kv small"><span className="k">GST collected</span><span>{inr(-t.gst)}</span></div>
+        <div className="kv small bold"><span>Revenue (without GST)</span><span>{inr(t.revenue)}</span></div>
+        <div className="kv small"><span className="k">Cost of goods sold</span><span>{inr(-t.cost)}</span></div>
+        <div className="kv small bold"><span>Gross profit</span><span>{inr(t.gross)}</span></div>
+        <div className="kv small"><span className="k">Shop expenses</span><span>{inr(-t.expenses)}</span></div>
+        <div className="kv total"><span>Profit</span><span style={red(t.profit)}>{rupees(t.profit)}</span></div>
+        <div className="tiny muted mt">
+          Margin {t.margin}% of revenue. Cost is the average purchase cost from Stock In; expenses are all those entered for these dates.
+        </div>
+      </div>
+
+      {isAdmin && d.kept > 0 && (
+        <div className="center mt">
+          <button className="btn ghost small" disabled={busy} onClick={recalc}>
+            {busy ? "Working it out…" : "Recalculate from the bills"}
+          </button>
+          <div className="tiny muted">Finished months are kept once worked out. Only needed if the Google Sheet was edited by hand.</div>
+        </div>
+      )}
+    </>
+  );
+}
+
+// one bar per month for the chosen value; a month below 0 (a loss) hangs under the line, in red
+function MonthBars({ months, pick, show, daysOf }) {
+  const [sel, setSel] = useState(months.length - 1);
+  const vals = months.map((m) => m[pick] || 0);
+  const hi = Math.max(0, ...vals);
+  const lo = Math.min(0, ...vals);
+  const span = hi - lo || 1;
+  const H = 50;
+  const zero = (hi / span) * H;
+  const w = 100 / months.length;
+  const cur = months[Math.min(sel, months.length - 1)];
+  return (
+    <div className="mt">
+      <div className="row between small mb">
+        <span className="muted">
+          {fmtMonth(cur.month)}
+          {cur.partial ? ` (${daysOf(cur)})` : ""}
+        </span>
+        <b className="money" style={(cur[pick] || 0) < 0 ? { color: "var(--bad)" } : undefined}>{show(cur[pick])}</b>
+      </div>
+      <svg viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 130 }} role="img" aria-label="Month by month">
+        <line x1="0" x2="100" y1={zero} y2={zero} stroke="var(--line)" strokeWidth="0.4" />
+        {vals.map((v, i) => {
+          const h = Math.max((Math.abs(v) / span) * H, 0.4);
+          return (
+            <rect
+              key={months[i].month}
+              x={i * w + w * 0.15}
+              y={v < 0 ? zero : zero - h}
+              width={w * 0.7}
+              height={h}
+              rx={0.6}
+              fill={v < 0 ? "var(--bad)" : i === sel ? "var(--brown)" : "var(--gold)"}
+              onClick={() => setSel(i)}
+              style={{ cursor: "pointer" }}
+            />
+          );
+        })}
+      </svg>
+      <div className="row tiny muted">
+        {months.map((m, i) => (
+          <span key={m.month} style={{ flex: 1, textAlign: "center" }}>
+            {months.length <= 12 || i % 3 === 0 ? fmtMonth(m.month).slice(0, 3) : ""}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Performance's leaderboard, drawn the way Home's is (rank, name and net, a bar, then the details) —
+// Home's own copy is left as it is; the range is set by the report, so there is no Today / This month switch
+function BoardCard({ rows }) {
+  const max = Math.max(1, ...rows.map((r) => r.net));
+  return (
+    <div className="card mt">
+      <div className="card-title">
+        <h3 className="row gap-s">
+          <Trophy size={18} color="var(--gold-dark)" /> Salespeople leaderboard
+        </h3>
+      </div>
+      {rows.length === 0 ? (
+        <div className="muted small center">No sales in these dates.</div>
+      ) : (
+        rows.map((r, i) => (
+          <div key={r.salesman_id} className="row mt">
+            <span className={"rank" + (i === 0 ? " r1" : "")}>{i + 1}</span>
+            <div className="grow">
+              <div className="row between">
+                <b className="ellipsis">{r.name}</b>
+                <b className="money">{inr(r.net)}</b>
+              </div>
+              <div className="bar-track" style={{ margin: "5px 0 3px" }}>
+                <div className="bar-fill" style={{ width: `${(r.net / max) * 100}%` }} />
+              </div>
+              <div className="tiny muted">
+                {r.bills} bills · avg {inr(Math.round(r.avg_bill))}
+                {r.returns > 0 ? ` · returns ${inr(r.returns)}` : ""}
+              </div>
+              <div className="tiny muted">
+                {plural("item", r.items || 0)} · {plural("new customer", r.new_customers || 0)}
+                {r.reviews ? ` · ${plural("Google review", r.reviews)}` : ""}
+                {r.samples ? ` · ${plural("sample", r.samples)}` : ""}
+              </div>
+            </div>
+          </div>
+        ))
       )}
     </div>
   );

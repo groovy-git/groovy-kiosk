@@ -144,7 +144,7 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
     // customer row. An exchange stops here on its first pass to learn what the replacement costs.
     if (opts && opts.preview) return { preview: true, grand_total: bill.grand_total, tendered, change };
 
-    const now = p._at || nowStr_(); // _at only used by demo seeding
+    const now = p._at || nowStr_(); // _at only used by demo seeding; dispatch_ drops it from any request (fromPhone_)
     const fy = fyOf_(now);
     const cust = upsertSaleCustomer_(custIn, bill.grand_total, now);
     const custGstin = str_(custIn && custIn.gstin).toUpperCase();

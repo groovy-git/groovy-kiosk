@@ -248,6 +248,8 @@ function createEnv() {
             getScriptProperties: () => ({
                 getProperty: (k) => (props.has(k) ? props.get(k) : null),
                 setProperty: (k, v) => props.set(k, String(v)),
+                // like Google's: adds or replaces these, leaves every other property alone
+                setProperties: (obj) => Object.keys(obj).forEach((k) => props.set(k, String(obj[k]))),
                 getProperties: () => Object.fromEntries(props),
                 deleteProperty: (k) => (props.delete(k), undefined),
             }),
