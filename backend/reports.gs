@@ -116,6 +116,7 @@ function apiDashboard_(p, ctx) {
     // so that is all that is read
     const since = monthStart < daysAgoStr_(29) ? monthStart : daysAgoStr_(29);
     const { own, sales, returns } = scope_(ctx, since, today);
+    const reviews = reviewsIn_(ctx, monthStart, today); // the leaderboard's Google reviews: this month at most
     const saleIds = {};
     sales.forEach((s) => (saleIds[s.id] = true));
 
@@ -195,8 +196,8 @@ function apiDashboard_(p, ctx) {
         low_stock: lowStock.slice(0, 15),
         low_stock_count: lowStock.length,
         leaderboard: {
-            today: leaderboard_(sales, returns, today, today),
-            month: leaderboard_(sales, returns, monthStart, today),
+            today: leaderboard_(sales, returns, today, today, reviews),
+            month: leaderboard_(sales, returns, monthStart, today, reviews),
         },
     };
     if (!ctx.branch_id) data.by_branch = branchBreakdown_(sales, returns, today, today, monthStart);
@@ -210,10 +211,11 @@ function apiDashboard_(p, ctx) {
     return { data };
 }
 
-function leaderboard_(sales, returns, from, to) {
+// `reviews`: counted Google reviews in scope (reviewsIn_, reviews.gs) — someone who only took reviews is listed too
+function leaderboard_(sales, returns, from, to, reviews) {
     const m = {};
     const row = (id, name) =>
-        (m[id] = m[id] || { salesman_id: id, name: name || "", bills: 0, items: 0, new_customers: 0, sales: 0, returns: 0, net: 0 });
+        (m[id] = m[id] || { salesman_id: id, name: name || "", bills: 0, items: 0, new_customers: 0, sales: 0, returns: 0, net: 0, reviews: 0, samples: 0 });
     const first = firstBillByCustomer_();
     sales.forEach((s) => {
         if (!inRange_(s.date, from, to)) return;
@@ -228,6 +230,12 @@ function leaderboard_(sales, returns, from, to) {
         if (!inRange_(x.at, from, to)) return;
         const r = row(x.salesman_id, users[x.salesman_id] ? users[x.salesman_id].name : "");
         r.returns = r2_(r.returns + x.total);
+    });
+    (reviews || []).forEach((v) => {
+        if (!inRange_(v.at, from, to)) return;
+        const r = row(v.salesman_id, v.salesman_name);
+        r.reviews++;
+        if (v.sample) r.samples++;
     });
     return Object.keys(m)
         .map((k) => {
@@ -254,6 +262,7 @@ function apiReport_(p, ctx) {
         profit: reportProfit_,
         stock_valuation: reportStock_,
         expenses: reportExpenses_,
+        google_reviews: reportReviews_,
     };
     if (!fns[type]) fail_("Unknown report");
     return { data: fns[type](p, ctx) };
@@ -339,7 +348,7 @@ function reportDayClose_(p, ctx) {
         methods,
         cash_expenses: cashExpenses,
         expected_cash: r2_((methods.cash ? methods.cash.net : 0) - cashExpenses),
-        by_salesman: leaderboard_(sales, returns, date, date),
+        by_salesman: leaderboard_(sales, returns, date, date, reviewsIn_(ctx, date, date)),
         voided: voided.map((s) => ({ invoice_no: s.invoice_no, amount: s.grand_total, salesman_name: s.salesman_name, notes: s.notes })),
         credit_notes: dayRets.map((r) => ({ credit_note_no: r.credit_note_no, invoice_no: r.invoice_no, total: r.total, method: r.refund_method, reason: r.reason })),
         items: daySoldItems_(daySales, ctx.branch_id),
@@ -353,7 +362,7 @@ function reportSalesmen_(p, ctx) {
     const { from, to } = rangeOf_(p);
     const { sales, returns } = scope_(ctx, from, to);
     const rs = sales.filter((s) => inRange_(s.date, from, to));
-    const base = leaderboard_(sales, returns, from, to);
+    const base = leaderboard_(sales, returns, from, to, reviewsIn_(ctx, from, to));
     // items and new customers come from leaderboard_ already; this adds what only this report shows
     const extra = {};
     rs.forEach((s) => {

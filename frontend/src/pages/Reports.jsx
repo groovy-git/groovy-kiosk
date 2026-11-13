@@ -17,6 +17,7 @@ const TYPES = [
   { value: "sales_register", label: "Sales register" },
   { value: "stock_valuation", label: "Stock value" },
   { value: "expenses", label: "Expenses" },
+  { value: "google_reviews", label: "Google reviews" },
 ];
 
 const RANGES = [
@@ -37,7 +38,7 @@ export default function Reports() {
   const [from, to] = range === "custom" ? [custom.from, custom.to] : RANGES.find((x) => x.value === range).r();
 
   // the same report with the same dates paints from last time, then refreshes
-  const { data: report, loading } = useCachedFetch(
+  const { data: report, loading, reload } = useCachedFetch(
     `gp_report_${type}_${from}_${to}_${date}_${group}`,
     () => api("report", { type, from, to, date, group }).then((r) => ({ type, d: r.data })),
     [type, from, to, date, group],
@@ -75,7 +76,7 @@ export default function Reports() {
             <Seg value={group} onChange={setGroup} options={[{ value: "variant", label: "Item" }, { value: "brand", label: "Brand" }, { value: "category", label: "Category" }]} />
           </div>
         )}
-        <div className="mt">{!data || data.type !== type ? <SkeletonList rows={4} height={70} /> : data.error ? null : <Report type={type} d={data.d} />}</div>
+        <div className="mt">{!data || data.type !== type ? <SkeletonList rows={4} height={70} /> : data.error ? null : <Report type={type} d={data.d} reload={reload} />}</div>
       </div>
     </>
   );
@@ -128,7 +129,8 @@ const Stat = ({ label, value, cls = "" }) => (
   </div>
 );
 
-function Report({ type, d }) {
+function Report({ type, d, reload }) {
+  if (type === "google_reviews") return <ReviewsReport d={d} reload={reload} />;
   if (type === "day_close") {
     const expected = d.expected_cash;
     return (
@@ -385,7 +387,7 @@ function SalesmenTable({ rows, title, full, csv }) {
     <div className="card mt table-wrap">
       <div className="card-title">
         <h3 className="row gap-s"><Trophy size={17} color="var(--gold-dark)" /> {title}</h3>
-        {csv && <Csv name="salesman-performance" rows={rows} cols={[{ key: "name", label: "Salesperson" }, { key: "bills", label: "Bills" }, { key: "items", label: "Items" }, { key: "new_customers", label: "New customers" }, { key: "gross", label: "Gross" }, { key: "discount", label: "Discount" }, { key: "sales", label: "Sales" }, { key: "returns", label: "Returns" }, { key: "net", label: "Net" }, { key: "avg_bill", label: "Avg bill" }]} />}
+        {csv && <Csv name="salesman-performance" rows={rows} cols={[{ key: "name", label: "Salesperson" }, { key: "bills", label: "Bills" }, { key: "items", label: "Items" }, { key: "new_customers", label: "New customers" }, { get: (r) => r.reviews || 0, label: "Google reviews" }, { get: (r) => r.samples || 0, label: "Samples given" }, { key: "gross", label: "Gross" }, { key: "discount", label: "Discount" }, { key: "sales", label: "Sales" }, { key: "returns", label: "Returns" }, { key: "net", label: "Net" }, { key: "avg_bill", label: "Avg bill" }]} />}
       </div>
       {rows.length === 0 ? (
         <div className="muted small">No sales.</div>
@@ -394,11 +396,103 @@ function SalesmenTable({ rows, title, full, csv }) {
           <thead><tr><th>Salesperson</th><th className="num">Bills</th>{full && <th className="num">Disc.</th>}<th className="num">Returns</th><th className="num">Net</th></tr></thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.salesman_id}><td><b>{r.name}</b><div className="tiny muted">{plural("item", r.items || 0)} · avg {inr(Math.round(r.avg_bill))}</div><div className="tiny muted">{plural("new customer", r.new_customers || 0)}</div></td><td className="num">{r.bills}</td>{full && <td className="num">{inr(r.discount)}</td>}<td className="num">{inr(r.returns)}</td><td className="num"><b>{inr(r.net)}</b></td></tr>
+              <tr key={r.salesman_id}><td><b>{r.name}</b><div className="tiny muted">{plural("item", r.items || 0)} · avg {inr(Math.round(r.avg_bill))}</div><div className="tiny muted">{plural("new customer", r.new_customers || 0)}{r.reviews ? ` · ${plural("Google review", r.reviews)}` : ""}{r.samples ? ` · ${plural("sample", r.samples)}` : ""}</div></td><td className="num">{r.bills}</td>{full && <td className="num">{inr(r.discount)}</td>}<td className="num">{inr(r.returns)}</td><td className="num"><b>{inr(r.net)}</b></td></tr>
             ))}
           </tbody>
         </table>
       )}
     </div>
+  );
+}
+
+// Google reviews (owner and manager): weekly totals per branch to set beside the new reviews Google shows,
+// then every review. Only the owner can say one doesn't count — it stays listed but leaves every count.
+function ReviewsReport({ d, reload }) {
+  const { isAdmin, multiBranch, toast } = useApp();
+  const [busyId, setBusyId] = useState(0);
+  const flip = async (r) => {
+    setBusyId(r.id);
+    try {
+      const x = await api("setReviewCounted", { id: r.id, counted: !r.counted });
+      toast(x.message, "success");
+      reload();
+    } catch (e) {
+      toast(e.message, "error", 4500);
+    } finally {
+      setBusyId(0);
+    }
+  };
+  const cols = [
+    { label: "Date", get: (r) => r.at },
+    { label: "Branch", key: "branch_name" },
+    { label: "Taken by", key: "salesman_name" },
+    { label: "Name on Google", key: "google_name" },
+    { label: "Customer", key: "customer_name" },
+    { label: "Mobile", key: "customer_phone" },
+    { label: "Sample", get: (r) => (r.sample ? "yes" : "") },
+    { label: "After a sale", get: (r) => (r.sale_id ? "yes" : "") },
+    { label: "Counts", get: (r) => (r.counted ? "yes" : "no") },
+  ];
+  return (
+    <>
+      <div className="grid-3">
+        <Stat cls="brown" label="Google reviews" value={d.totals.reviews} />
+        <Stat label="Samples given" value={d.totals.samples} />
+        <Stat label="Don't count" value={d.totals.not_counted} />
+      </div>
+      <div className="card mt table-wrap">
+        <div className="card-title">
+          <h3>By week</h3>
+          <span className="small muted">Compare with new reviews on Google</span>
+        </div>
+        {d.weeks.length === 0 ? (
+          <div className="muted small">No reviews in these dates.</div>
+        ) : (
+          <table className="tbl">
+            <thead><tr><th>Week (Mon – Sun)</th>{multiBranch && <th>Branch</th>}<th className="num">Reviews</th><th className="num">Samples</th></tr></thead>
+            <tbody>
+              {d.weeks.map((w) => (
+                <tr key={w.week + "|" + w.branch_id}><td>{fmtDate(w.week)} – {fmtDate(w.to)}</td>{multiBranch && <td>{w.branch_name}</td>}<td className="num"><b>{w.reviews}</b></td><td className="num">{w.samples}</td></tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+      <div className="card mt">
+        <div className="card-title">
+          <h3>Reviews</h3>
+          {d.rows.length > 0 && <Csv name={`google-reviews-${d.from}-${d.to}`} rows={d.rows} cols={cols} />}
+        </div>
+        {d.rows.length === 0 ? (
+          <div className="muted small">No reviews in these dates.</div>
+        ) : (
+          <div className="list">
+            {d.rows.map((r) => (
+              <div key={r.id} className="list-item" style={{ cursor: "default", opacity: r.counted ? 1 : 0.6 }}>
+                <div className="grow">
+                  <div className="title">
+                    {r.google_name || r.customer_name || r.customer_phone} {!r.counted && <span className="badge bad">Doesn't count</span>}
+                  </div>
+                  <div className="sub">
+                    {fmtDateTime(r.at)} · {r.salesman_name}
+                    {multiBranch ? " · " + r.branch_name : ""}
+                  </div>
+                  <div className="sub">
+                    {r.customer_phone}
+                    {r.sample ? " · sample given" : ""}
+                    {r.sale_id ? " · after a sale" : ""}
+                  </div>
+                </div>
+                {isAdmin && (
+                  <Button className="ghost small" loading={busyId === r.id} onClick={() => flip(r)}>
+                    {r.counted ? "Doesn't count" : "Counts"}
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }

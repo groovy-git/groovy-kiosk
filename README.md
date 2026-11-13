@@ -164,6 +164,8 @@ The app prints an **80 mm receipt** or an **A4 tax invoice** using the phone's o
 
 - **Sell:** scan or tap items, then **View bill → Checkout**. Enter the customer's mobile number (optional). To give an offer, tap it under **Offer**: it fills in the **Bill discount**, which you can still change in ₹ or %. A salesperson can give an offer in full even above their discount limit; the hint under the discount shows the most they can give on that bill. Choose Cash, UPI or Card (tap **Split payment** to combine them), then tap **Complete**. Print the bill or share it; the owner can also send it on WhatsApp.
 - **Customers:** go to **More → Customers** and tap a customer to see their bills. The owner can also call them, chat on WhatsApp, edit them, add a customer by hand, and use **Add to contacts**: it hands the name and number to the phone, and the phone's Contacts app asks you to save (on an iPhone, choose **Contacts** in the share sheet that opens). Once tapped it reads **Added to contacts** on that phone. Managers and salespeople find a customer by name or by the full mobile number; part of a number finds nothing.
+- **Google reviews:** anyone at the counter, buying or not, can be asked for a review. Tap **☆** on the Sell screen (or **Google review** after a sale, which fills in that customer). The customer scans the QR code with their phone camera and writes the review. Enter their mobile number (and their first name on Google, if easy), tick **Sample perfume given** if you gave one, then **Save review**. A number counts once per branch. Each salesperson's reviews show next to their items and new customers (Home, Reports → Salespeople, day close).
+    - **Owner:** paste each branch's Google review link once in **Settings → Branches** (in Google Business Profile, tap **Ask for reviews** and copy the link). **Reports → Google reviews** lists every review with weekly totals per branch to compare with the new reviews on Google; mark any that aren't there **Doesn't count**.
 - **End of day:** go to **More → Reports → Day close**. It shows the cash you should have in the drawer and a breakdown by salesperson.
 
 ## Branches (more than one shop)
@@ -259,7 +261,7 @@ Every bill is also kept as an A4 PDF in your Google Drive:
 - **Removing a product:** hide it with the eye icon on Edit product. Its bills and reports stay intact. The owner can **Delete** a product only if it was never sold, stocked in, adjusted or transferred, for example a duplicate added by mistake.
 - **Load demo data only into a test copy of the sheet:** **Groovy Kiosk → 2. Load demo data**. It refuses to run if products already exist.
 - **Going live after testing:** first back up with **File → Make a copy**, then run **Groovy Kiosk → 3. Reset test data (keep setup)…** and type `RESET`.
-    - It clears bills, payments, returns, held bills, expenses, customers, stock history, stock-ins and transfers. It sets all stock to 0 and restarts bill numbers at 00001.
+    - It clears bills, payments, returns, held bills, expenses, customers, Google reviews, stock history, stock-ins and transfers. It sets all stock to 0 and restarts bill numbers at 00001.
     - It keeps products and prices, categories, brands, staff, branches and shop settings.
     - Everyone is logged out. Log in again on each phone, then enter your real stock with **Stock In**.
     - This can’t be undone, which is why you make the copy first.

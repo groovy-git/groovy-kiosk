@@ -2284,19 +2284,22 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     const xch = gc("exchange", { client_ref: "gx1", sale_id: xb.sale.id, items: [{ sale_item_id: xb.items[0].id, qty: 1, restock: true }], reason: "swap", lines: [{ variant_id: GV, qty: 1 }], payments: [], refund_method: "cash" }, NG);
     check("exchange at a no-GST branch: new bill has no GST", xch.success && xch.data.sale.gst_hidden === 2 && xch.data.sale.cgst === 0, xch.message || xch.data.sale);
     // a sheet from before this version: asks for Setup; Setup adds the column; branches stay GST-on
+    // (gst_off and every Branches column added after it are cleared: a sheet from before gst_off has none of them)
     const brSh = gEnv.ss.getSheetByName("Branches");
-    const brCols = Object.keys(require("vm").runInContext("SCHEMA.Branches", gEnv.ctx)).length;
+    const brKeys = Object.keys(require("vm").runInContext("SCHEMA.Branches", gEnv.ctx));
+    const brCols = brKeys.indexOf("gst_off") + 1;
+    const brNewer = brKeys.length - brCols + 1;
     const retSh = gEnv.ss.getSheetByName("Returns");
     const retCols = Object.keys(require("vm").runInContext("SCHEMA.Returns", gEnv.ctx)).length;
-    const keptBr = brSh.getRange(2, brCols, brSh.getLastRow() - 1, 1).getValues();
-    brSh.getRange(1, brCols, brSh.getLastRow(), 1).setValues(brSh.getRange(1, brCols, brSh.getLastRow(), 1).getValues().map(() => [""]));
+    const keptBr = brSh.getRange(2, brCols, brSh.getLastRow() - 1, brNewer).getValues();
+    brSh.getRange(1, brCols, brSh.getLastRow(), brNewer).setValues(brSh.getRange(1, brCols, brSh.getLastRow(), brNewer).getValues().map((r) => r.map(() => "")));
     retSh.getRange(1, retCols).setValue("");
     const stale = gc("getCatalog", {}, 1);
     check("older sheet without the new columns asks for Setup", !stale.success && stale.code === "SETUP", stale);
     gEnv.ctx.setupSheets();
-    check("Setup adds the columns back", gc("getCatalog", {}, 1).success && brSh.getRange(1, brCols).getValue() === "gst_off" && retSh.getRange(1, retCols).getValue() === "gst_off");
+    check("Setup adds the columns back", gc("getCatalog", {}, 1).success && brSh.getRange(1, brCols).getValue() === "gst_off" && brSh.getRange(1, brKeys.length).getValue() === brKeys[brKeys.length - 1] && retSh.getRange(1, retCols).getValue() === "gst_off");
     check("...and every branch reads as GST on (blank)", brList().every((b) => b.gst_off === 0), brList());
-    brSh.getRange(2, brCols, keptBr.length, 1).setValues(keptBr);
+    brSh.getRange(2, brCols, keptBr.length, brNewer).setValues(keptBr);
 }
 
 // ---- a stock mover carries stock between branches: products and stock, never sales ----
@@ -2786,6 +2789,113 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("...the owner still saves other settings, the page sending the offers back unchanged", other.success && oc("getSettings", {}).data.business_name === "Groovy Test", other.message);
     check("...checkout treats them as no offers", /no longer available/.test(sale(OS, three, { bill_disc: 460, offer_id: "pct20" }).message));
     check("...and changing them is checked as before", /could not be read/.test(save("[{still bad").message) && save(JSON.stringify(start)).success && offersNow(OS).length === 3);
+}
+
+// ---- Google reviews taken at the kiosk: once per number per branch, counted towards whoever took them ----
+{
+    const rEnv = createEnv();
+    rEnv.ctx.setupSheets();
+    const rPwd = /Password: (\S+)/.exec(rEnv.alerts.pop())[1];
+    const RT = rEnv.call("login", { email: "owner@groovy.test", password: rPwd }).data.token;
+    const rc = (a, p, t, b) => rEnv.call(a, p, t || RT, b === undefined ? 1 : b);
+    const B2 = rc("saveBranch", { name: "Review Two", code: "RV" }).data.id;
+    const rCat = rc("bootstrap", {}).data.catalog.categories[0].id;
+    rc("saveProduct", { name: "Review Test", category_id: rCat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: 500, sell_price: 500, cost: 200, opening_stock: 50, barcode: "RV1" }] });
+    const RV = rc("getCatalog", {}).data.variants.find((v) => v.barcode === "RV1").id;
+    const spId = rc("saveUser", { name: "Rev Sp", email: "rv-sp@x.in", role: "salesperson", password: "shop-pass-1", branch_id: 1, branch_ids: [1, B2] }).data.id;
+    const sp2Id = rc("saveUser", { name: "Rev Sp Two", email: "rv-sp2@x.in", role: "salesperson", password: "shop-pass-3", branch_id: 1, branch_ids: [1] }).data.id;
+    rc("saveUser", { name: "Rev Mgr", email: "rv-mgr@x.in", role: "manager", password: "shop-pass-2", branch_id: 1 });
+    rc("saveUser", { name: "Rev Mover", email: "rv-mo@x.in", role: "stock_mover", password: "shop-pass-4", branch_id: 1, branch_ids: [1, B2] });
+    const RS = rEnv.call("login", { email: "rv-sp@x.in", password: "shop-pass-1" }).data.token;
+    const RS2 = rEnv.call("login", { email: "rv-sp2@x.in", password: "shop-pass-3" }).data.token;
+    const RM = rEnv.call("login", { email: "rv-mgr@x.in", password: "shop-pass-2" }).data.token;
+    const RMO = rEnv.call("login", { email: "rv-mo@x.in", password: "shop-pass-4" }).data.token;
+    const PH = "9811177777";
+    const mask = (d) => rEnv.ctx.maskPhone_(d);
+
+    // recording one
+    check("reviews: the mobile number is needed", /10-digit mobile/.test(rc("addReview", { google_name: "Asha" }, RS).message));
+    const a1 = rc("addReview", { phone: PH, google_name: "Asha", sample: true }, RS);
+    check("reviews: a salesperson records one, sample given", a1.success && a1.data.sample === 1 && a1.data.salesman_id === spId && a1.data.counted === 1, a1.message || a1.data);
+    check("...the number comes back masked to them, as everywhere", a1.success && a1.data.customer_phone === mask(PH), a1.data && a1.data.customer_phone);
+    check("reviews: the Google name is optional", rc("addReview", { phone: "9811177778" }, RS).success);
+    const again = rc("addReview", { phone: PH }, RS2);
+    check("reviews: the same number again at the same branch is refused, saying when and by whom", /already given a review here, on \d+ \w{3} \d{4} \(taken by Rev Sp\)/.test(again.message), again.message);
+    check("...the same number at another branch counts there", rc("addReview", { phone: PH }, RS, B2).success);
+    check("reviews: a salesperson can't record one under someone else's name", /under their own name/.test(rc("addReview", { phone: "9811177779", salesman_id: sp2Id }, RS).message));
+    check("reviews: a manager records one for a salesperson", rc("addReview", { phone: "9811177780", salesman_id: sp2Id }, RM).success);
+    check("reviews: someone not working at the branch can't be named", /does not work at Review Two/.test(rc("addReview", { phone: "9811177781", salesman_id: sp2Id }, RT, B2).message));
+    check("reviews: a stock mover can't record them", rc("addReview", { phone: "9811177782" }, RMO).code === "FORBIDDEN");
+
+    // the customer it makes
+    const asha = rc("listCustomers", { q: PH }).data[0];
+    check("reviews: a new reviewer becomes a customer with no bills, named as on Google", asha && asha.name === "Asha" && asha.bills === 0, asha);
+    check("...who is not counted as a new customer (that count is of first bills)", rc("dashboard", {}).data.today.new_customers === 0);
+
+    // after a sale: linked to the bill, a masked number standing for the bill's customer
+    const sold = rc("completeSale", { client_ref: "rv-s1", lines: [{ variant_id: RV, qty: 1 }], payments: [{ method: "cash", amount: 500 }], customer: { phone: "9811177790", name: "Buyer" } }, RS).data;
+    const linked = rc("addReview", { phone: sold.sale.customer_phone, from_sale_id: sold.sale.id, sale_id: sold.sale.id }, RS);
+    check("reviews: one taken after a sale, from the masked number on the bill, goes through", linked.success && sold.sale.customer_phone === mask("9811177790"), linked.message);
+    const listOwner = () => rc("report", { type: "google_reviews" }, RT, 0).data;
+    const linkedRow = listOwner().rows.find((r) => r.id === linked.data.id);
+    check("...linked to that bill, with the real number for the owner", linkedRow && linkedRow.sale_id === sold.sale.id && linkedRow.customer_phone === "9811177790", linkedRow);
+
+    // the counts, beside items and new customers
+    const rowOf = (rows, id) => rows.find((r) => r.salesman_id === id);
+    const mine = rc("dashboard", {}, RS).data.leaderboard;
+    check("My performance: a salesperson's own reviews and samples, today and this month", rowOf(mine.today, spId).reviews === 3 && rowOf(mine.today, spId).samples === 1 && rowOf(mine.month, spId).reviews === 3 && mine.today.length === 1, mine.today);
+    const board = rc("dashboard", {}).data.leaderboard.today;
+    check("leaderboard: someone with reviews but no sales is listed", rowOf(board, sp2Id) && rowOf(board, sp2Id).reviews === 1 && rowOf(board, sp2Id).bills === 0, board);
+    check("leaderboard: reviews at another branch stay there", rowOf(rc("dashboard", {}, RT, B2).data.leaderboard.today, spId).reviews === 1);
+    const dc = rc("report", { type: "day_close" }).data;
+    check("day close: per salesperson counts", rowOf(dc.by_salesman, spId).reviews === 3 && rowOf(dc.by_salesman, sp2Id).reviews === 1, dc.by_salesman.map((r) => [r.name, r.reviews, r.samples]));
+    const perf = rc("report", { type: "salesman_performance" }).data.rows;
+    check("Salespeople report: per salesperson counts", rowOf(perf, spId).reviews === 3 && rowOf(perf, spId).samples === 1 && rowOf(perf, sp2Id).reviews === 1, perf.map((r) => [r.name, r.reviews, r.samples]));
+    const mail = JSON.stringify(rEnv.ctx.dayCloseMail_(dc, rEnv.ctx.settingsMap_(), {}));
+    check("the day-close email shows them under the name", /3 Google reviews · 1 sample/.test(mail) && /3 Google reviews, 1 sample/.test(mail));
+
+    // the owner's list and say
+    const all = listOwner();
+    check("Google reviews report: every review, newest first", all.rows.length === 5 && all.rows[0].id > all.rows[1].id, all.rows.length);
+    const wk1 = all.weeks.find((w) => w.branch_id === 1);
+    check("...weekly totals per branch", wk1 && wk1.reviews === 4 && wk1.samples === 1 && all.weeks.find((w) => w.branch_id === B2).reviews === 1, all.weeks);
+    const mgrList = rc("report", { type: "google_reviews" }, RM).data;
+    check("managers get the list, numbers masked", mgrList.rows.length === 4 && JSON.stringify(mgrList).indexOf(PH) < 0 && mgrList.rows.some((r) => r.customer_phone === mask(PH)));
+    check("a salesperson can't open the list", /Access denied/.test(rc("report", { type: "google_reviews" }, RS).message));
+    check("only the owner can say a review doesn't count", rc("setReviewCounted", { id: a1.data.id, counted: false }, RM).code === "FORBIDDEN");
+    check("the owner marks one 'doesn't count'", rc("setReviewCounted", { id: a1.data.id, counted: false }).success);
+    const after = rowOf(rc("report", { type: "salesman_performance" }).data.rows, spId);
+    check("...it leaves every count", after.reviews === 2 && after.samples === 0 && rowOf(rc("dashboard", {}, RS).data.leaderboard.today, spId).reviews === 2, after);
+    check("...but stays listed, marked", listOwner().rows.find((r) => r.id === a1.data.id).counted === 0 && listOwner().totals.not_counted === 1);
+    const redo = rc("addReview", { phone: PH }, RS2);
+    check("...and the number can be recorded again (the customer reviewed after all)", redo.success, redo.message);
+    check("...after which the old one can't count again too", /already counts/.test(rc("setReviewCounted", { id: a1.data.id, counted: true }).message));
+
+    // the review-fix checks: a bill from another branch, a corrected number, whole weeks, the nightly email, reset
+    rc("transferStock", { to_branch_id: B2, lines: [{ variant_id: RV, qty: 5 }] });
+    const soldB2 = rc("completeSale", { client_ref: "rv-s2", lines: [{ variant_id: RV, qty: 1 }], payments: [{ method: "cash", amount: 500 }], customer: { phone: "9811177791" } }, RS, B2).data;
+    check("a review can't be linked to a bill from another branch", /made at Review Two/.test(rc("addReview", { phone: "9811177791", sale_id: soldB2.sale.id }, RS, 1).message));
+    const before = rc("listCustomers", { q: "9811177778" }).data[0];
+    rc("saveCustomer", { id: before.id, name: before.name, phone: "9811177799" });
+    const moved = rc("addReview", { phone: "9811177799" }, RS);
+    check("once per customer: a number corrected after the review still finds them", /already given a review here/.test(moved.message), moved.message);
+    const wk = listOwner().weeks[0];
+    const dow = new Date(wk.week + "T00:00:00Z").getUTCDay();
+    check("weekly totals run Monday to Sunday", dow === 1 && wk.to > wk.week && new Date(wk.to + "T00:00:00Z").getUTCDay() === 0, wk);
+    const rName = listOwner().rows.find((r) => r.id === a1.data.id);
+    check("the list shows the customer's name kept on the review", rName.customer_name === "Asha", rName);
+    rc("saveBranch", { id: 1, name: "Main branch", code: "", report_emails: "owner-box@x.in" });
+    rEnv.ctx.resetReqCache_();
+    // a day with reviews and no bills at Review Two is still emailed when empty days are skipped
+    rc("voidSale", { id: soldB2.sale.id, reason: "test" }, RT, B2);
+    rc("saveBranch", { id: B2, name: "Review Two", code: "RV", report_emails: "two-box@x.in" });
+    rEnv.ctx.resetReqCache_();
+    const nightly = rEnv.ctx.sendBranchDayCloses_(true, "");
+    check("nightly email: a branch with reviews is not skipped as empty", nightly.some((m) => /^Review Two: sent/.test(m)), nightly);
+    rEnv.ctx.resetReqCache_();
+    const reset = rEnv.ctx.resetTestData_();
+    rEnv.ctx.resetReqCache_();
+    check("Reset test data clears the reviews too", rEnv.ctx.rows_("Reviews").length === 0, reset);
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);

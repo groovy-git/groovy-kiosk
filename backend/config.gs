@@ -259,6 +259,7 @@ const SCHEMA = {
         active: "n",
         created_at: "d",
         gst_off: "n", // 1 = branch not GST-registered: its bills carry no GST. Blank/0 = GST on (every older branch)
+        review_link: "s", // the branch's Google review page, shown as a QR code when a review is taken
     },
     Branch_Stock: { variant_id: "n", branch_id: "n", qty: "n" },
     Transfers: {
@@ -271,6 +272,24 @@ const SCHEMA = {
         note: "s",
         user_id: "n",
         at: "d",
+    },
+    // Google reviews taken at the kiosk (reviews.gs): counted towards the salesperson who took them
+    Reviews: {
+        id: "n",
+        at: "d",
+        branch_id: "n",
+        salesman_id: "n",
+        salesman_name: "s",
+        customer_id: "n",
+        customer_name: "s", // the customer's name in the app at the time
+        customer_phone: "s",
+        google_name: "s", // as on the review, if given (a first name is enough)
+        sample: "n", // 1 = a sample perfume went with it
+        sale_id: "n", // the bill it was taken after, if any
+        counted: "n", // 0 = the owner marked it "doesn't count" (not found on Google)
+        checked_by: "n",
+        checked_at: "d",
+        created_by: "n",
     },
 };
 

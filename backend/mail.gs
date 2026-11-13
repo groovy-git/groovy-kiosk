@@ -50,6 +50,12 @@ function dateNice_(ymd) {
 
 const METHOD_NAME_ = { cash: "Cash", upi: "UPI", card: "Card", exchange: "Exchange" };
 
+// a salesperson's Google reviews (and samples) for the day, after their other counts; nothing when none
+function reviewsTxt_(r, sep) {
+    if (!r.reviews) return "";
+    return sep + r.reviews + " Google " + (r.reviews === 1 ? "review" : "reviews") + (r.samples ? sep + r.samples + (r.samples === 1 ? " sample" : " samples") : "");
+}
+
 /** Builds subject + HTML + plain text for a reportDayClose_ result. */
 function dayCloseMail_(d, s, opt) {
     const biz = s.business_name || "Groovy Fragrances";
@@ -74,7 +80,7 @@ function dayCloseMail_(d, s, opt) {
     const sub = (txt) => '<div style="font-size:11px;color:#7A716A">' + txt + "</div>";
     const sellers = d.by_salesman
         .map((r, i) => "<tr><td " + td + ">" + (i + 1) + ". " + escHtml_(r.name) +
-            sub(r.items + " items billed · " + r.new_customers + " new " + (r.new_customers === 1 ? "customer" : "customers")) +
+            sub(r.items + " items billed · " + r.new_customers + " new " + (r.new_customers === 1 ? "customer" : "customers") + reviewsTxt_(r, " · ")) +
             "</td><td " + tdr + ">" + r.bills + "</td><td " + tdr + ">" +
             inrText_(r.returns) + "</td><td " + tdr + "><b>" + inrText_(r.net) + "</b></td></tr>")
         .join("");
@@ -149,7 +155,7 @@ function dayCloseMail_(d, s, opt) {
         d.by_salesman
             .map((r) =>
                 r.name + ": " + r.bills + " bills, " + r.items + " items, " +
-                r.new_customers + " new " + (r.new_customers === 1 ? "customer" : "customers") + ", " + inrText_(r.net))
+                r.new_customers + " new " + (r.new_customers === 1 ? "customer" : "customers") + reviewsTxt_(r, ", ") + ", " + inrText_(r.net))
             .join("\n"),
         items.length ? "\nItems sold:" : "",
         items
@@ -223,7 +229,8 @@ function sendBranchDayCloses_(skipEmpty, footer) {
         if (!to.length) return b.name + ": no recipients";
         const sys = { user: { id: 0, name: "Nightly report", role: "owner", email: "" }, branch_id: b.id };
         const d = reportDayClose_({ date }, sys);
-        if (skipEmpty && !d.bills && !d.returns && !d.voided.length) return b.name + ": skipped (no sales)";
+        // a day with only Google reviews taken is not an empty day
+        if (skipEmpty && !d.bills && !d.returns && !d.voided.length && !d.by_salesman.some((r) => r.reviews)) return b.name + ": skipped (no sales)";
         sendMail_(to, dayCloseMail_(d, s, { salesperson: "", footer }), {});
         log_(sys, "EMAIL", "Reports", date, b.name + " day close sent to " + to.length + " address(es)");
         return b.name + ": sent";

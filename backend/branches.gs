@@ -23,7 +23,7 @@ function branchName_(id) {
 }
 
 function branchOut_(b) {
-    return { id: b.id, name: b.name, code: b.code, address: b.address, phone: b.phone, active: b.active, gst_off: b.gst_off ? 1 : 0 };
+    return { id: b.id, name: b.name, code: b.code, address: b.address, phone: b.phone, active: b.active, gst_off: b.gst_off ? 1 : 0, review_link: b.review_link || "" };
 }
 
 // a branch that isn't GST-registered: its bills are recorded with no GST (and left out of GST reports)
@@ -199,6 +199,8 @@ function apiSaveBranch_(p, ctx) {
     const emails = splitEmails_(p.report_emails);
     const bad = emails.filter((e) => !EMAIL_RE_.test(e));
     if (bad.length) fail_("Not a valid email: " + bad.join(", "));
+    const link = str_(p.review_link);
+    if (link && (!/^https:\/\/\S+$/.test(link) || link.length > 300)) fail_("The Google review link must be a web address starting with https://");
 
     return withLock_(() => {
         const all = rows_("Branches");
@@ -214,12 +216,13 @@ function apiSaveBranch_(p, ctx) {
             const active = p.active === undefined ? b.active : p.active ? 1 : 0;
             if (!active && all.filter((x) => x.active && x.id !== b.id).length === 0) fail_("At least one branch must stay active");
             const gstOff = p.gst_off === undefined ? (b.gst_off ? 1 : 0) : p.gst_off ? 1 : 0; // an older app doesn't send it: kept
-            Object.assign(b, { name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active, gst_off: gstOff });
+            const reviewLink = p.review_link === undefined ? str_(b.review_link) : link; // likewise
+            Object.assign(b, { name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active, gst_off: gstOff, review_link: reviewLink });
             updateRows_("Branches", [b]);
             log_(ctx, "UPDATE", "Branches", b.id, name);
             return { message: "Branch saved", data: branchOut_(b) };
         }
-        const b = { id: nextId_("Branches"), name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active: 1, created_at: now, gst_off: p.gst_off ? 1 : 0 };
+        const b = { id: nextId_("Branches"), name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active: 1, created_at: now, gst_off: p.gst_off ? 1 : 0, review_link: link };
         appendRows_("Branches", [b]);
         log_(ctx, "CREATE", "Branches", b.id, name + (code ? " (" + code + ")" : ""));
         return { message: "Branch added", data: branchOut_(b) };

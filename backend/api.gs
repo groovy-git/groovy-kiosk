@@ -53,6 +53,7 @@ function actions_() {
     report: { fn: apiReport_, roles: ALL_ }, // per-report check inside
     movements: { fn: apiMovements_, roles: ALL_ },
     emailDayClose: { fn: apiEmailDayClose_, roles: ALL_ }, // salesperson gets own figures only
+    addReview: { fn: apiAddReview_, roles: ALL_ }, // a Google review taken at the kiosk (reviews.gs)
 
     // owner + manager
     saveBrand: { fn: apiSaveBrand_, roles: AM_ },
@@ -87,6 +88,7 @@ function actions_() {
     listLogs: { fn: apiListLogs_, roles: A_ },
     listBranches: { fn: apiListBranches_, roles: A_ },
     saveBranch: { fn: apiSaveBranch_, roles: A_ },
+    setReviewCounted: { fn: apiSetReviewCounted_, roles: A_ }, // only the owner says a review doesn't count
     };
     return ACTIONS_CACHE_;
 }

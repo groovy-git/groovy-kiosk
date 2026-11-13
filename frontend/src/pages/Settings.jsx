@@ -527,7 +527,7 @@ function BranchesSettings() {
           ))}
         </div>
       )}
-      <button className="btn secondary block mt" onClick={() => setEdit({ name: "", code: "", address: "", phone: "", report_emails: "", active: 1, gst_off: 0 })}>
+      <button className="btn secondary block mt" onClick={() => setEdit({ name: "", code: "", address: "", phone: "", report_emails: "", active: 1, gst_off: 0, review_link: "" })}>
         <Plus size={18} /> Add branch
       </button>
       {edit && (
@@ -583,6 +583,12 @@ function BranchSheet({ b, prefix, onClose, onSaved }) {
       </Field>
       <Field label="Day-close emails for this branch" hint="e.g. the branch manager. The owner list in Settings → Email also gets every branch.">
         <input className="input" inputMode="email" value={f.report_emails} onChange={(e) => setF({ ...f, report_emails: e.target.value })} placeholder="manager@gmail.com" />
+      </Field>
+      <Field
+        label="Google review link"
+        hint="Shown as a QR code when staff ask a customer for a review. In Google Business Profile for this branch, tap “Ask for reviews” and copy the link."
+      >
+        <input className="input" inputMode="url" value={f.review_link || ""} onChange={(e) => setF({ ...f, review_link: e.target.value.trim() })} placeholder="https://g.page/r/…/review" />
       </Field>
       <div className="field">
         <label>GST</label>

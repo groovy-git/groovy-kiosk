@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ChevronRight, Clock, SearchX, Repeat2, X } from "lucide-react";
+import { ChevronRight, Clock, SearchX, Repeat2, Star, X } from "lucide-react";
 import { useApp } from "../store";
 import TopBar from "../components/TopBar";
 import CameraScanner from "../components/CameraScanner";
@@ -16,6 +16,7 @@ import CheckoutSheet from "./sell/CheckoutSheet";
 import LooseSheet from "./sell/LooseSheet";
 import SuccessSheet from "./sell/SuccessSheet";
 import HeldSheet from "./sell/HeldSheet";
+import ReviewSheet from "./sell/ReviewSheet";
 
 export default function Sell() {
   const { catalog, cart, setCart, settings, toast, isAllBranches, role } = useApp();
@@ -27,6 +28,7 @@ export default function Sell() {
   const [sheet, setSheet] = useState(null); // cart | checkout | held
   const [loose, setLoose] = useState(null);
   const [done, setDone] = useState(null);
+  const [review, setReview] = useState(null); // a Google review being recorded: {} or that bill's customer
   const searchRef = useRef(null);
   const allowNeg = settings.allow_negative_stock === "yes";
 
@@ -125,9 +127,15 @@ export default function Sell() {
       <TopBar
         title="New Sale"
         right={
-          <button className="icon-btn" onClick={() => setSheet("held")} aria-label="Held bills">
-            <Clock />
-          </button>
+          <>
+            {/* a Google review from anyone at the counter, buying or not */}
+            <button className="icon-btn" onClick={() => setReview({})} aria-label="Google review">
+              <Star />
+            </button>
+            <button className="icon-btn" onClick={() => setSheet("held")} aria-label="Held bills">
+              <Clock />
+            </button>
+          </>
         }
       />
       <div className={"page" + (cart.lines.length ? " has-bar" : "")}>
@@ -206,7 +214,8 @@ export default function Sell() {
         }}
       />
       <HeldSheet open={sheet === "held"} onClose={() => setSheet(null)} />
-      <SuccessSheet detail={done} onClose={() => setDone(null)} />
+      <SuccessSheet detail={done} onClose={() => setDone(null)} onReview={(s) => setReview({ phone: s.customer_phone || "", name: s.customer_name || "", sale_id: s.id, salesman_id: s.salesman_id })} />
+      <ReviewSheet review={review} onClose={() => setReview(null)} />
     </>
   );
 }

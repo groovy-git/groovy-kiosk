@@ -1,10 +1,10 @@
-import { Check, MessageCircle, Printer, FileText, Share2, Plus } from "lucide-react";
+import { Check, MessageCircle, Printer, FileText, Share2, Plus, Star } from "lucide-react";
 import { useApp } from "../../store";
 import { inr, qtyLabel, METHOD_LABEL } from "../../lib/format";
 import { a4InvoiceHtml, billText, printHtml, receiptHtml, whatsappLink } from "../../lib/print";
 import { Sheet } from "../../components/ui";
 
-export default function SuccessSheet({ detail, onClose }) {
+export default function SuccessSheet({ detail, onClose, onReview }) {
   const { settings, multiBranch, isAdmin } = useApp();
   if (!detail) return null;
   const shop = { ...settings, multi_branch: multiBranch };
@@ -64,6 +64,12 @@ export default function SuccessSheet({ detail, onClose }) {
           </button>
         )}
       </div>
+      {/* the customer just served, asked for a Google review: their number and name are filled in */}
+      {onReview && (
+        <button className="btn secondary block mt" onClick={() => onReview(s)}>
+          <Star size={18} /> Google review
+        </button>
+      )}
     </Sheet>
   );
 }

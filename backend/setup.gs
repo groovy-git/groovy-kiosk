@@ -27,7 +27,7 @@ function onOpen() {
 const RESET_TABS_ = [
     "Sales", "Sale_Items", "Payments", "Returns", "Return_Items", "Held_Bills",
     "Expenses", "Customers", "Stock_Movements", "Stock_In_Batches", "Transfers", "Branch_Stock",
-    "Activity_Logs", "Sessions",
+    "Activity_Logs", "Sessions", "Reviews",
 ];
 
 // the catalogue — kept by "reset test data" (it is the work you want to survive going live) and
@@ -38,8 +38,8 @@ function resetTestData() {
     const ui = SpreadsheetApp.getUi();
     const r = ui.prompt(
         "Reset test data",
-        "This permanently deletes all bills, payments, returns, held bills, expenses, customers, stock history, " +
-            "stock-ins and transfers, sets all stock to 0 and restarts bill numbers at 00001. Everyone is logged out.\n\n" +
+        "This permanently deletes all bills, payments, returns, held bills, expenses, customers, Google reviews, " +
+            "stock history, stock-ins and transfers, sets all stock to 0 and restarts bill numbers at 00001. Everyone is logged out.\n\n" +
             "The invoice PDFs go to Drive's bin as well: bill numbers start again at 00001, so keeping them would " +
             "leave two different invoices with the same name.\n\n" +
             "Kept: products & prices, photos, categories, brands, staff, branches and shop settings. " +
