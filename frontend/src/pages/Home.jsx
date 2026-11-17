@@ -301,7 +301,10 @@ export default function Home() {
                     <span className="ellipsis">
                       {v.name} <span className="muted">{v.size}</span>
                     </span>
-                    <span className={v.stock_qty <= 0 ? "bad-text bold" : "bold"}>{v.stock_qty <= 0 ? "Out" : v.unit === "ml" ? `${v.stock_qty} ml` : v.stock_qty}</span>
+                    <span className="nowrap">
+                      <span className={v.stock_qty <= 0 ? "bad-text bold" : "bold"}>{v.stock_qty <= 0 ? "Out" : v.unit === "ml" ? `${v.stock_qty} ml` : v.stock_qty}</span>
+                      {v.fill > 0 && <span className="muted"> · Fill {v.unit === "ml" ? `${v.fill} ml` : v.fill}</span>}
+                    </span>
                   </div>
                 ))}
               </div>

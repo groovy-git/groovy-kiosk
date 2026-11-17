@@ -85,6 +85,9 @@ const SCHEMA = {
         active: "n",
         created_at: "d",
         updated_at: "d",
+        // "Fill up to": the full-shelf count. When stock is low, the app says how many to put back
+        // (max_level − stock). One number for every branch, like reorder_level. 0 = not set.
+        max_level: "n",
     },
     Stock_Movements: {
         id: "n",

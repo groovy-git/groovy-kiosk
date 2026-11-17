@@ -1,5 +1,16 @@
 // Joins the flat catalog tables into sellable items + fast lookup maps.
 
+import { r3 } from "./format.js"; // with .js: backend/dev/roundtrip.js loads this file in Node
+
+/* Low stock and "Fill up to" — the same rules as isLow_ / fillQty_ in backend/reports.gs. */
+
+// out, or at or below its low stock alert; `stock` defaults to this branch's
+export const isLow = (item, stock = item.stock) => stock <= 0 || (item.reorder > 0 && stock <= item.reorder);
+
+// how many to put back to reach "Fill up to": only for a low item with one set, else 0.
+// Stock below zero is an empty shelf, not a deeper hole to fill.
+export const fillQty = (item, stock = item.stock) => (item.max > 0 && isLow(item, stock) ? r3(Math.max(0, item.max - Math.max(0, stock))) : 0);
+
 export function imageUrl(img, w = 400) {
   if (!img) return "";
   if (img.startsWith("drive:")) return `https://lh3.googleusercontent.com/d/${img.slice(6)}=w${w}`;
@@ -39,6 +50,7 @@ export function buildCatalog(cat) {
       stock: v.stock_qty, // at the branch this phone is working at
       stockBy: v.stock_by_branch || {}, // {branch_id: qty} for every branch
       reorder: v.reorder_level,
+      max: v.max_level || 0, // "Fill up to"; 0 = not set (also on a catalogue saved before it existed)
       barcode: v.barcode,
       sku: v.sku,
       gst: p.gst_rate,

@@ -20,6 +20,7 @@ function apiGetCatalog_(p, ctx) {
         return { data: { version: version, branch_id: num_(ctx.branch_id), unchanged: true } };
     }
     const showCost = isStaffManager_(ctx);
+    const showFill = seesFill_(ctx);
     const stock = stockMap_(ctx.branch_id); // 0 = all branches → totals
     const byBranch = stockByBranch_();
     const core = catalogCore_(version);
@@ -41,6 +42,7 @@ function apiGetCatalog_(p, ctx) {
                     active: v.active,
                 };
                 if (showCost) o.avg_cost = v.avg_cost;
+                if (showFill) o.max_level = v.max_level; // "Fill up to": not a salesperson's (see seesFill_)
                 return o;
             }),
         },
@@ -57,7 +59,8 @@ function apiGetCatalog_(p, ctx) {
  * the stored copy looks wrong, it is simply rebuilt.
  */
 function catalogCore_(version) {
-    const key = "cat_" + version;
+    // "cat2_": the stored shape gained max_level — a copy kept from before that is never handed out
+    const key = "cat2_" + version;
     const cache = CacheService.getScriptCache();
     const saved = readChunked_(cache, key);
     if (saved) {
@@ -81,7 +84,7 @@ function catalogCore_(version) {
         variants: rows_("Variants").map((v) => ({
             id: v.id, product_id: v.product_id, sku: v.sku, barcode: v.barcode,
             size_label: v.size_label, size_ml: v.size_ml, unit: v.unit, mrp: v.mrp,
-            sell_price: v.sell_price, reorder_level: v.reorder_level, active: v.active, avg_cost: v.avg_cost,
+            sell_price: v.sell_price, reorder_level: v.reorder_level, max_level: v.max_level, active: v.active, avg_cost: v.avg_cost,
         })),
     };
     try {
@@ -260,6 +263,9 @@ function cleanVariant_(v, saleType) {
         mrp: r2_(num_(v.mrp)),
         sell_price: r2_(num_(v.sell_price)),
         reorder_level: num_(v.reorder_level),
+        // "Fill up to". Older app versions don't send it — the saved one is kept (see max_given)
+        max_level: num_(v.max_level),
+        max_given: v.max_level !== undefined && v.max_level !== null,
         active: v.active === undefined ? 1 : v.active ? 1 : 0,
         opening_stock: num_(v.opening_stock),
         cost: r2_(num_(v.cost)),
@@ -269,6 +275,12 @@ function cleanVariant_(v, saleType) {
     if (out.mrp > 0 && out.sell_price > out.mrp) fail_("Selling price cannot be more than MRP (" + out.size_label + ")");
     if (out.mrp <= 0) out.mrp = out.sell_price;
     if (out.opening_stock < 0) fail_("Opening stock cannot be negative");
+    if (out.max_given) {
+        if (out.max_level < 0) fail_("Fill up to cannot be negative (" + out.size_label + ")");
+        // at or below the alert, a low item would have nothing (or less than nothing) to fill
+        if (out.max_level > 0 && out.reorder_level > 0 && out.max_level <= out.reorder_level)
+            fail_("Fill up to must be more than the low stock alert (" + out.size_label + ")");
+    }
     return out;
 }
 
@@ -322,7 +334,7 @@ function apiSaveProduct_(p, ctx) {
                 Object.assign(ex, {
                     size_label: v.size_label, size_ml: v.size_ml, unit: v.unit, barcode: v.barcode,
                     sku: v.sku_given ? v.sku : ex.sku, mrp: v.mrp, sell_price: v.sell_price, reorder_level: v.reorder_level,
-                    active: v.active, updated_at: now,
+                    max_level: v.max_given ? v.max_level : ex.max_level, active: v.active, updated_at: now,
                 });
                 if (v.cost > 0) ex.avg_cost = v.cost;
                 updateRows_("Variants", [ex]);
@@ -332,7 +344,7 @@ function apiSaveProduct_(p, ctx) {
                 id: nextVid++, product_id: prod.id, sku: v.sku, barcode: v.barcode, size_label: v.size_label,
                 size_ml: v.size_ml, unit: v.unit, mrp: v.mrp, sell_price: v.sell_price, avg_cost: v.cost,
                 stock_qty: 0, reorder_level: v.reorder_level, active: v.active,
-                created_at: now, updated_at: now,
+                created_at: now, updated_at: now, max_level: v.max_level,
             };
             newRows.push(row);
             if (v.opening_stock > 0)
@@ -494,7 +506,7 @@ function apiUploadImage_(p, ctx) {
 
 /**
  * rows: [{brand, category, product, gender, sale_type, size_label, size_ml, barcode,
- *         mrp, sell_price, cost, opening_stock, hsn, gst_rate, reorder_level, image, sku}]
+ *         mrp, sell_price, cost, opening_stock, hsn, gst_rate, reorder_level, max_level, image, sku}]
  * Rows with the same brand+product become sizes of one product.
  * A row matching an existing size (by barcode, else brand+product+size) UPDATES it — blank cells keep
  * the current value and stock is never changed — so re-uploading a file never creates duplicates.
@@ -629,6 +641,9 @@ function apiImportCatalog_(p, ctx) {
                             mrp: blank(r.mrp) ? match.mrp : r.mrp,
                             sell_price: blank(r.sell_price) ? match.sell_price : r.sell_price,
                             reorder_level: blank(r.reorder_level) ? (num_(match.reorder_level) > 0 ? match.reorder_level : rfb) : r.reorder_level,
+                            // "Fill up to": a blank cell keeps it. Checked against the alert only when the
+                            // file gives one of the two — a row that names neither is never refused for it
+                            max_level: blank(r.max_level) && blank(r.reorder_level) ? undefined : blank(r.max_level) ? match.max_level : r.max_level,
                             cost: blank(r.cost) ? 0 : r.cost,
                         },
                         prod.sale_type,
@@ -637,6 +652,7 @@ function apiImportCatalog_(p, ctx) {
                         size_ml: v.size_ml, barcode: v.barcode, mrp: v.mrp, sell_price: v.sell_price,
                         reorder_level: v.reorder_level, avg_cost: v.cost > 0 ? v.cost : match.avg_cost,
                         sku: match.sku || sku, // a size without SKU gets the file's
+                        max_level: v.max_given ? v.max_level : match.max_level,
                     };
                     const nextProd = {};
                     if (!prod._new) {
@@ -671,6 +687,7 @@ function apiImportCatalog_(p, ctx) {
                     {
                         size_label: r.size_label, size_ml: r.size_ml, barcode: code || (freeCode(fb) ? fb : ""), mrp: r.mrp,
                         sell_price: r.sell_price, reorder_level: blank(r.reorder_level) ? rfb : r.reorder_level,
+                        max_level: blank(r.max_level) ? undefined : r.max_level,
                         opening_stock: r.opening_stock, cost: r.cost,
                     },
                     saleType,
@@ -693,7 +710,8 @@ function apiImportCatalog_(p, ctx) {
                 const row = {
                     id: vid++, product_id: prod.id, sku: str_(r.sku), barcode: v.barcode, size_label: v.size_label,
                     size_ml: v.size_ml, unit: v.unit, mrp: v.mrp, sell_price: v.sell_price, avg_cost: v.cost,
-                    stock_qty: 0, reorder_level: v.reorder_level, active: 1, created_at: now, updated_at: now, _new: true,
+                    stock_qty: 0, reorder_level: v.reorder_level, active: 1, created_at: now, updated_at: now,
+                    max_level: v.max_level, _new: true,
                 };
                 newVars.push(row);
                 (varsByProd[prod.id] = varsByProd[prod.id] || []).push(row);

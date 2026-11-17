@@ -13,7 +13,14 @@ import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
 import { Button, Chips, Field, MoneyInput, Seg, Spinner, useConfirm } from "../components/ui";
 
 const GST = [0, 5, 12, 18, 28];
-const blankVariant = (barcode = "") => ({ id: 0, size_label: "", size_ml: "", sku: "", barcode, mrp: "", sell_price: "", cost: "", opening_stock: "", reorder_level: "3", active: 1 });
+const blankVariant = (barcode = "") => ({ id: 0, size_label: "", size_ml: "", sku: "", barcode, mrp: "", sell_price: "", cost: "", opening_stock: "", reorder_level: "3", max_level: "", active: 1 });
+
+// "Fill up to" has to be above the low stock alert, or a low item would have nothing to fill
+const levelError = (v) => {
+  const max = Number(v.max_level) || 0;
+  const low = Number(v.reorder_level) || 0;
+  return max > 0 && low > 0 && max <= low ? "Must be more than the low stock alert" : "";
+};
 
 export default function ProductForm({ id }) {
   const { rawCatalog, catalog, refreshCatalog, toast, isManager, isAdmin } = useApp();
@@ -33,7 +40,12 @@ export default function ProductForm({ id }) {
     if (existing)
       return rawCatalog.variants
         .filter((v) => v.product_id === existing.id)
-        .map((v) => ({ ...v, cost: v.avg_cost ?? "", opening_stock: "", size_ml: v.size_ml || "", sku: v.sku || "" }));
+        .map((v) => ({
+          ...v, cost: v.avg_cost ?? "", opening_stock: "", size_ml: v.size_ml || "", sku: v.sku || "",
+          // a catalogue saved on this phone before "Fill up to" existed has none: left undefined, it is
+          // not sent unless typed in, and the server keeps what is saved
+          max_level: v.max_level === undefined ? undefined : v.max_level > 0 ? String(v.max_level) : "",
+        }));
     return [blankVariant(route.params.get("barcode") || "")];
   });
   const [scanFor, setScanFor] = useState(null);
@@ -136,6 +148,7 @@ export default function ProductForm({ id }) {
     for (const v of vars) {
       const c = clash(v.barcode, v.id) || skuClash(v.sku, v.id);
       if (c) return toast(c, "error");
+      if (levelError(v)) return toast(`Fill up to must be more than the low stock alert${loose ? "" : ` (${v.size_label || "size"})`}`, "error");
     }
     setBusy(true);
     try {
@@ -154,6 +167,7 @@ export default function ProductForm({ id }) {
           cost: v.cost,
           opening_stock: v.id ? 0 : v.opening_stock,
           reorder_level: v.reorder_level,
+          max_level: v.max_level, // undefined (left out) when this phone's catalogue doesn't know it yet
           active: v.active,
         })),
       };
@@ -371,6 +385,9 @@ export default function ProductForm({ id }) {
                 )}
                 <Field label={loose ? "Low stock alert (ml)" : "Low stock alert at"}>
                   <input className="input" inputMode="numeric" value={v.reorder_level} onChange={(e) => setV(i, { reorder_level: e.target.value.replace(/[^\d.]/g, "") })} />
+                </Field>
+                <Field label={loose ? "Fill up to (ml)" : "Fill up to"} error={levelError(v)} hint="When low, shows how many to put back">
+                  <input className="input" inputMode="numeric" value={v.max_level ?? ""} onChange={(e) => setV(i, { max_level: e.target.value.replace(/[^\d.]/g, "") })} placeholder="Not set" />
                 </Field>
               </div>
               {Number(v.sell_price) > 0 && Number(v.cost) > 0 && (

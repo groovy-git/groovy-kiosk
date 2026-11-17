@@ -1,5 +1,7 @@
 // Photo compression (phone camera photos are huge) + CSV helpers.
 
+import { fillQty } from "./catalog.js"; // with .js: backend/dev/roundtrip.js loads this file in Node
+
 export function compressImage(file, maxSize = 800, quality = 0.8) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -94,10 +96,10 @@ export function downloadText(filename, text, mime = "text/csv") {
 }
 
 export const IMPORT_TEMPLATE = [
-  "brand,product,category,gender,sale_type,size_label,size_ml,sku,barcode,mrp,sell_price,cost,opening_stock,reorder_level,hsn,gst_rate",
-  "Lattafa,Asad Eau De Parfum,Eau De Parfum,men,packed,100ml,100,GF-ASAD-100,6291108735411,3500,1950,1450,6,2,3303,18",
-  "Lattafa,Asad Eau De Parfum,Eau De Parfum,men,packed,30ml,30,GF-ASAD-30,,1200,899,600,4,2,3303,18",
-  "Groovy,White Musk Attar,Loose Attar,unisex,loose,Loose (per ml),,,,30,25,12,500,100,3303,18",
+  "brand,product,category,gender,sale_type,size_label,size_ml,sku,barcode,mrp,sell_price,cost,opening_stock,reorder_level,max_level,hsn,gst_rate",
+  "Lattafa,Asad Eau De Parfum,Eau De Parfum,men,packed,100ml,100,GF-ASAD-100,6291108735411,3500,1950,1450,6,2,6,3303,18",
+  "Lattafa,Asad Eau De Parfum,Eau De Parfum,men,packed,30ml,30,GF-ASAD-30,,1200,899,600,4,2,5,3303,18",
+  "Groovy,White Musk Attar,Loose Attar,unisex,loose,Loose (per ml),,,,30,25,12,500,100,500,3303,18",
 ].join("\n");
 
 /* ---------- our own product export: every size, in the columns the import reads ---------- */
@@ -112,11 +114,29 @@ export const IMPORT_TEMPLATE = [
  * they are taken off again before a file is sent.
  */
 export function catalogToImportCSV(catalog, branches = []) {
+  return toCSV(catalog.items, exportColumns(catalog, branches));
+}
+
+/**
+ * The refill list (Stock → Low stock → Download refill list): the same file as "Export all products",
+ * for just the items given — the low and out-of-stock ones on the screen — plus how many to put back
+ * on this branch's shelf to reach "Fill up to". Edited and uploaded, Import takes it like the full
+ * export (reorder_level and max_level included); the info_ columns, the number to fill among them,
+ * are only for reading. The number is blank where no "Fill up to" is set.
+ */
+export function refillListCSV(catalog, items, branches = [], branch = null) {
+  return toCSV(items, [
+    ...exportColumns(catalog, branches),
+    { label: "info_to_fill" + (branch ? "_" + branch.name : ""), get: (it) => fillQty(it) || "" },
+  ]);
+}
+
+function exportColumns(catalog, branches) {
   const typeOf = (it) => {
     const t = (catalog.productById.get(it.product_id) || {}).sale_type;
     return t === "loose" || t === "packed" ? t : ""; // anything else: left for Import to keep as it is
   };
-  const cols = [
+  return [
     { label: "brand", key: "brand" },
     { label: "product", key: "name" },
     { label: "category", key: "category" },
@@ -131,6 +151,7 @@ export function catalogToImportCSV(catalog, branches = []) {
     { label: "cost", get: (it) => (it.cost > 0 ? it.cost : "") },
     { label: "opening_stock", get: () => "" },
     { label: "reorder_level", key: "reorder" },
+    { label: "max_level", key: "max" }, // "Fill up to"
     { label: "hsn", get: (it) => excelText(it.hsn) },
     { label: "gst_rate", key: "gst" },
     { label: "image", get: (it) => it.image || "" },
@@ -139,7 +160,6 @@ export function catalogToImportCSV(catalog, branches = []) {
       ? branches.map((b) => ({ label: "info_stock_" + b.name, get: (it) => it.stockBy[b.id] || 0 }))
       : [{ label: "info_stock", get: (it) => it.stock || 0 }]),
   ];
-  return toCSV(catalog.items, cols);
 }
 
 // the reading-only columns of our export never go to the server

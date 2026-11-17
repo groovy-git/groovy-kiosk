@@ -170,12 +170,18 @@ function apiDashboard_(p, ctx) {
     const lowStock = [];
     const branchStock = stockMap_(ctx.branch_id);
     const pmap = indexBy_(rows_("Products"), "id");
+    const withFill = seesFill_(ctx);
+    const shelf = withFill && oneShelf_(ctx.branch_id);
     rows_("Variants").forEach((v) => {
         const prod = pmap[v.product_id];
         if (!v.active || !prod || !prod.active) return;
         const q = branchStock[v.id] || 0;
-        if (q <= 0 || (v.reorder_level > 0 && q <= v.reorder_level))
-            lowStock.push({ variant_id: v.id, name: prod.name, size: v.size_label, unit: v.unit, stock_qty: q, reorder_level: v.reorder_level });
+        if (isLow_(v, q)) {
+            const row = { variant_id: v.id, name: prod.name, size: v.size_label, unit: v.unit, stock_qty: q, reorder_level: v.reorder_level };
+            if (withFill) row.max_level = v.max_level;
+            if (shelf) row.fill = fillQty_(v, q);
+            lowStock.push(row);
+        }
     });
     lowStock.sort((a, b) => a.stock_qty - b.stock_qty);
 
@@ -277,11 +283,39 @@ function apiReport_(p, ctx) {
     return { data: fns[type](p, ctx) };
 }
 
+/* ---------- low stock and "Fill up to" (mirrored by isLow / fillQty in the app's lib/catalog.js) ---------- */
+
+// out, or at or below its low stock alert
+function isLow_(v, q) {
+    return q <= 0 || (v.reorder_level > 0 && q <= v.reorder_level);
+}
+
+// how many to put back to reach "Fill up to" (max_level) — only for a low item with one set, else 0.
+// Stock below zero (allowed by a setting) is an empty shelf, not a deeper hole to fill.
+function fillQty_(v, q) {
+    return v.max_level > 0 && isLow_(v, q) ? r3_(Math.max(0, v.max_level - Math.max(0, q))) : 0;
+}
+
+// Who is told how many to fill: the people who can bring stock into a branch (Stock In: owner and
+// managers; Transfer: them and the stock mover). Not a salesperson, who can do neither — they still
+// see what is low or out. Deny by default: a role not listed is not sent max_level or fill.
+function seesFill_(ctx) {
+    return AM_MOVER_.indexOf(ctx.user.role) >= 0;
+}
+
+// Is this stock one shelf? A branch's is. "All branches" adds up every shop's, and one number to fill
+// two shelves would be wrong — unless the shop has only one branch. Branches is only read for the
+// "All branches" case, where the request has usually read it already.
+function oneShelf_(branchId) {
+    return num_(branchId) > 0 || activeBranches_().length <= 1;
+}
+
 /**
  * What left the shelf on these bills — one row per product size, qty net of returns,
  * with current stock so the owner knows what to refill. Items needing a refill come first.
  */
-function daySoldItems_(daySales, branchId) {
+// withFill: also say how many to put back ("Fill up to") — not on a salesperson's day close (seesFill_)
+function daySoldItems_(daySales, branchId, withFill) {
     const ids = {};
     daySales.forEach((s) => (ids[s.id] = true));
     const agg = {};
@@ -297,13 +331,18 @@ function daySoldItems_(daySales, branchId) {
     });
     const vmap = indexBy_(rows_("Variants"), "id");
     const stock = stockMap_(branchId || 0);
+    const shelf = withFill && oneShelf_(branchId || 0);
     return Object.keys(agg)
         .map((k) => {
             const a = agg[k];
             const v = vmap[a.variant_id];
             a.stock_left = stock[a.variant_id] || 0;
             a.reorder_level = v ? v.reorder_level : 0;
-            a.refill = v ? a.stock_left <= 0 || (v.reorder_level > 0 && a.stock_left <= v.reorder_level) : false;
+            a.refill = v ? isLow_(v, a.stock_left) : false;
+            if (withFill) {
+                a.max_level = v ? v.max_level : 0;
+                a.fill = v && shelf ? fillQty_(v, a.stock_left) : 0;
+            }
             return a;
         })
         .sort((x, y) => (y.refill ? 1 : 0) - (x.refill ? 1 : 0) || y.qty - x.qty || x.name.localeCompare(y.name));
@@ -360,7 +399,7 @@ function reportDayClose_(p, ctx) {
         by_salesman: leaderboard_(sales, returns, date, date, reviewsIn_(ctx, date, date)),
         voided: voided.map((s) => ({ invoice_no: s.invoice_no, amount: s.grand_total, salesman_name: s.salesman_name, notes: s.notes })),
         credit_notes: dayRets.map((r) => ({ credit_note_no: r.credit_note_no, invoice_no: r.invoice_no, total: r.total, method: r.refund_method, reason: r.reason })),
-        items: daySoldItems_(daySales, ctx.branch_id),
+        items: daySoldItems_(daySales, ctx.branch_id, seesFill_(ctx)),
         branch_id: ctx.branch_id,
         branch_name: ctx.branch_id ? branchName_(ctx.branch_id) : "All branches",
         by_branch: ctx.branch_id ? [] : branchBreakdown_(sales, returns, date, date),

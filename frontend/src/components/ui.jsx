@@ -4,7 +4,7 @@ import { X, Search, ScanLine, Minus, Plus, PackageOpen, ChevronLeft, ChevronRigh
 import { useBackClose } from "../hooks/useBackClose";
 import { useApp } from "../store";
 import { fmtDate, initials } from "../lib/format";
-import { imageUrl } from "../lib/catalog";
+import { imageUrl, isLow, fillQty } from "../lib/catalog";
 
 // Rendered into <body> so a sheet opened from inside a styled container (e.g. the brown
 // sidebar) never inherits that container's styles.
@@ -399,11 +399,26 @@ export function Avatar({ name, gold }) {
   return <div className={"avatar" + (gold ? " gold" : "")}>{initials(name)}</div>;
 }
 
-export function StockBadge({ item }) {
-  if (item.stock <= 0) return <span className="badge bad">Out of stock</span>;
-  if (item.reorder > 0 && item.stock <= item.reorder)
-    return <span className="badge gold">Low · {item.unit === "ml" ? `${item.stock} ml` : item.stock}</span>;
-  return <span className="badge ok">{item.unit === "ml" ? `${item.stock} ml` : `${item.stock} in stock`}</span>;
+// showFill: false where the stock shown is not one shelf ("All branches" adds up every shop's)
+export function StockBadge({ item, showFill = true }) {
+  const badge =
+    item.stock <= 0 ? (
+      <span className="badge bad">Out of stock</span>
+    ) : isLow(item) ? (
+      <span className="badge gold">Low · {item.unit === "ml" ? `${item.stock} ml` : item.stock}</span>
+    ) : (
+      <span className="badge ok">{item.unit === "ml" ? `${item.stock} ml` : `${item.stock} in stock`}</span>
+    );
+  const fill = showFill ? fillQty(item) : 0;
+  if (!fill) return badge;
+  // a pill of its own under the badge, not in it: a wider badge squeezes the product name on a small
+  // phone. Orange for a low item, red (like "Out of stock") for an empty shelf.
+  return (
+    <span className="badge-stack">
+      {badge}
+      <span className={"badge " + (item.stock <= 0 ? "bad" : "orange")}>Fill {item.unit === "ml" ? `${fill} ml` : fill}</span>
+    </span>
+  );
 }
 
 // simple confirm sheet: const confirm = useConfirm(); if (await confirm({...})) ...

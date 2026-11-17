@@ -23,8 +23,8 @@ function check(name, cond, extra) {
 const lib = (f) => import(pathToFileURL(path.join(__dirname, "..", "..", "frontend", "src", "lib", f)).href);
 
 (async () => {
-    const { parseCSV, catalogToImportCSV, withoutInfoColumns, importParts, checkImport, excelText, IMPORT_TEMPLATE } = await lib("files.js");
-    const { buildCatalog } = await lib("catalog.js");
+    const { parseCSV, catalogToImportCSV, withoutInfoColumns, importParts, checkImport, excelText, IMPORT_TEMPLATE, refillListCSV } = await lib("files.js");
+    const { buildCatalog, isLow } = await lib("catalog.js");
 
     const env = createEnv();
     const { ctx, call } = env;
@@ -120,6 +120,51 @@ const lib = (f) => import(pathToFileURL(path.join(__dirname, "..", "..", "fronte
         [now1("6291108735411").stock, now1("6291108735411").cost, rose.stock]);
     const csv2 = catalogToImportCSV(cat1, branches);
     check("exporting again gives the edited values, and importing that changes nothing", /,2100,/.test(csv2) && send(parseCSV(csv2))[0].data.unchanged === sizes);
+
+    // ---- "Fill up to" (max_level) goes round the file like the reorder level ----
+    check("export: a max_level column right after reorder_level", header.includes(",reorder_level,max_level,"), header);
+    const filled = parseCSV(csv2);
+    filled.find((r) => r.barcode === "6291108735411").max_level = "10";
+    const dF = send(filled)[0].data;
+    const cat2 = catalogNow();
+    check("edited max_level: 1 updated, the rest unchanged, and it is the new value", dF.updated === 1 && dF.unchanged === sizes - 1 && dF.errors.length === 0 && cat2.byBarcode.get("6291108735411").max === 10, dF);
+    const csv3 = catalogToImportCSV(cat2, branches);
+    check("...exported again it is in the file, and importing that changes nothing", /,2,10,/.test(csv3) && send(parseCSV(csv3))[0].data.unchanged === sizes);
+    const fillBad = parseCSV(csv3);
+    fillBad.find((r) => r.barcode === "6291108735411").max_level = "2";
+    check("...a Fill up to at the low alert skips that row only, saying why", (() => { const d = send(fillBad)[0].data; return d.errors.length === 1 && /Fill up to must be more/.test(d.errors[0].message) && d.unchanged === sizes - 1; })());
+    check("...and leaves it as it was", catalogNow().byBarcode.get("6291108735411").max === 10);
+
+    // ---- the refill list (Stock → Low stock → Download refill list): the same file, low items only ----
+    oc("adjustStock", { variant_id: cat2.byBarcode.get("6291108735411").id, mode: "set", qty: 1 }); // 1 left: alert 2, Fill up to 10
+    const catL = catalogNow();
+    const lowItems = catL.items.filter((i) => i.active && isLow(i));
+    const here = branches[0]; // the owner works at the first branch in these calls
+    const rcsv = refillListCSV(catL, lowItems, branches, here);
+    const rHead = rcsv.split("\n")[0];
+    check("refill list: the export's columns, then how many to fill at this branch", rHead === header + ",info_to_fill_" + here.name, rHead);
+    const rrows = parseCSV(rcsv);
+    check("...only the low and out-of-stock sizes, in the order given", lowItems.length >= 2 && rrows.length === lowItems.length && rrows.every((r, i) => r.product === lowItems[i].name)
+        && !rrows.some((r) => r.product === "Rose Loose Attar"), rrows.map((r) => r.product));
+    const fillKey = "info_to_fill_" + here.name.toLowerCase().replace(/\s+/g, "_");
+    const rRoyal = rrows.find((r) => r.barcode === "6291108735411");
+    const rPlain = rrows.find((r) => r.product === "Plain No Codes");
+    check("...how many to put back: 10 − 1 = 9, blank where no Fill up to is set",
+        rRoyal && rRoyal[fillKey] === "9" && rRoyal.reorder_level === "2" && rRoyal.max_level === "10" && rPlain && rPlain[fillKey] === "", [rRoyal, rPlain]);
+    const chkL = checkImport(withoutInfoColumns(rrows), catL);
+    check("...the check before saving: every row matches, none new", chkL.matched === rrows.length && chkL.fresh.length === 0 && chkL.damaged.length === 0, chkL);
+    const dL0 = send(rrows)[0].data;
+    check("...uploaded untouched: every row unchanged, none skipped", dL0.unchanged === rrows.length && dL0.updated === 0 && dL0.errors.length === 0, dL0);
+    const redit = parseCSV(rcsv);
+    redit.find((r) => r.barcode === "6291108735411").max_level = "12";
+    Object.assign(redit.find((r) => r.product === "Plain No Codes"), { reorder_level: "5", max_level: "20" });
+    redit.forEach((r) => Object.keys(r).filter((k) => /^info_/.test(k)).forEach((k) => (r[k] = "99"))); // stock and to-fill typed over
+    const dL = send(redit)[0].data;
+    const catL2 = catalogNow();
+    const plainL = catL2.items.find((i) => i.name === "Plain No Codes");
+    check("...edited: those 2 sizes updated (the one with no barcode found by brand + product + size), the rest unchanged",
+        dL.updated === 2 && dL.unchanged === rrows.length - 2 && dL.errors.length === 0 && catL2.byBarcode.get("6291108735411").max === 12 && plainL.reorder === 5 && plainL.max === 20, dL);
+    check("...numbers typed into the info_ columns (stock, to fill) change nothing", catL2.byBarcode.get("6291108735411").stock === 1 && plainL.stock === 0);
 
     // ---- the check before saving: what it is there to catch ----
     const renamed = parseCSV(csv2);

@@ -3228,5 +3228,117 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("...so the kept months are as they were", perf().months.find((x) => x.month === M2).bills === p1.months.find((x) => x.month === M2).bills);
 }
 
+// ---- "Fill up to": a low item says how many to put back on the shelf (max_level − stock) ----
+{
+    const fEnv = createEnv();
+    fEnv.ctx.setupSheets();
+    const fPwd = /Password: (\S+)/.exec(fEnv.alerts.pop())[1];
+    const FT = fEnv.call("login", { email: "owner@groovy.test", password: fPwd }).data.token;
+    const oc = (a, p, b) => fEnv.call(a, p, FT, b);
+    const fCat = oc("bootstrap", {}).data.catalog.categories[0].id;
+    const size = (o) => Object.assign({ size_label: "50ml", mrp: 500, sell_price: 450, barcode: "FL1", reorder_level: 10 }, o);
+    const save = (v, id) => oc("saveProduct", { id, name: "Fill Test", category_id: fCat, gst_rate: 18, variants: [v] }, 1);
+    const fv = (code) => oc("getCatalog", {}, 1).data.variants.find((v) => v.barcode === (code || "FL1"));
+
+    const r0 = save(size({ cost: 200, opening_stock: 8, max_level: 30 }));
+    check("Fill up to: a size saves with one", r0.success, r0.message);
+    const PID = r0.data.id;
+    const FV = fv().id;
+    check("...and the catalogue carries it", fv().max_level === 30 && fv().reorder_level === 10, fv());
+    const old = save(size({ id: FV, sell_price: 440 }), PID);
+    check("a save from an older app (no max_level sent) keeps it", old.success && fv().max_level === 30 && fv().sell_price === 440, fv());
+    const atAlert = save(size({ id: FV, max_level: 10 }), PID);
+    check("Fill up to at the low alert is refused, and nothing changes", /Fill up to must be more than the low stock alert \(50ml\)/.test(atAlert.message) && fv().max_level === 30, atAlert.message);
+    check("...below it too", !save(size({ id: FV, max_level: 4 }), PID).success && fv().max_level === 30);
+    check("...and a negative one", /cannot be negative/.test(save(size({ id: FV, max_level: -1, reorder_level: 0 }), PID).message));
+    check("with no low alert any Fill up to is allowed", save(size({ id: FV, reorder_level: 0, max_level: 5 }), PID).success && fv().max_level === 5);
+    check("blank clears it (0 = not set)", save(size({ id: FV, max_level: "" }), PID).success && fv().max_level === 0 && fv().reorder_level === 10);
+    check("set again", save(size({ id: FV, max_level: 30 }), PID).success && fv().max_level === 30);
+
+    // Home's low-stock list: 8 left, alert 10, fill up to 30 → put back 22
+    const low = (b, id) => oc("dashboard", {}, b).data.low_stock.find((x) => x.variant_id === (id || FV));
+    check("Home: 8 left, alert 10, Fill up to 30 → fill 22", low(1) && low(1).stock_qty === 8 && low(1).fill === 22 && low(1).max_level === 30, low(1));
+    check("...a shop with one branch: 'All branches' is that one shelf", low(0) && low(0).fill === 22, low(0));
+    const B2 = oc("saveBranch", { name: "Second Shop", code: "S2" }).data.id;
+    check("...two branches: 'All branches' adds up two shelves, so no fill number", low(0) && low(0).fill === undefined, low(0));
+    check("...out of stock at the second branch → fill 30", low(B2) && low(B2).stock_qty === 0 && low(B2).fill === 30, low(B2));
+    oc("adjustStock", { variant_id: FV, mode: "set", qty: 11 }, 1);
+    check("above the alert: not low, so no fill", !low(1));
+    oc("adjustStock", { variant_id: FV, mode: "set", qty: 10 }, 1);
+    check("at the alert: low, fill 20", low(1) && low(1).fill === 20, low(1));
+    const lp = oc("saveProduct", { name: "Fill Loose", category_id: fCat, gst_rate: 18, sale_type: "loose", variants: [{ mrp: 30, sell_price: 25, opening_stock: 60.5, reorder_level: 100, max_level: 500, barcode: "FL2" }] }, 1);
+    check("loose attar: 60.5 ml of 500 → fill 439.5 ml", lp.success && low(1, fv("FL2").id) && low(1, fv("FL2").id).fill === 439.5, low(1, fv("FL2").id));
+    check("stock below zero is an empty shelf: fill = Fill up to", fEnv.ctx.fillQty_({ max_level: 30, reorder_level: 10 }, -2) === 30 && fEnv.ctx.fillQty_({ max_level: 0, reorder_level: 10 }, 3) === 0);
+
+    // Day close: the sold item to refill says how many
+    oc("adjustStock", { variant_id: FV, mode: "set", qty: 8 }, 1);
+    const sold = oc("completeSale", { client_ref: "fill-1", lines: [{ variant_id: FV, qty: 1 }], payments: [{ method: "cash", amount: 1000 }] }, 1);
+    check("Fill up to: a sale goes through", sold.success, sold.message);
+    const dcItem = (b) => oc("report", { type: "day_close" }, b).data.items.find((i) => i.variant_id === FV);
+    check("Day close: sold, 7 left → refill, fill 23", dcItem(1) && dcItem(1).refill && dcItem(1).stock_left === 7 && dcItem(1).fill === 23 && dcItem(1).max_level === 30, dcItem(1));
+    check("...'All branches' (two shops): still refill, no fill number", dcItem(0) && dcItem(0).refill && dcItem(0).fill === 0, dcItem(0));
+    const mail = fEnv.ctx.dayCloseMail_(oc("report", { type: "day_close" }, 1).data, {}, { salesperson: "", footer: "" });
+    check("the day-close email says REFILL 23", /<< REFILL 23\b/.test(mail.text) && />REFILL 23</.test(mail.html), mail.text);
+
+    // who is told how many to fill: the owner, managers and stock movers — not a salesperson, who can
+    // neither Stock In nor Transfer (they still see what is low or out)
+    const mkUser = (name, email, role) => oc("saveUser", { name, email, role, password: "shop-pass-1", branch_id: 1, branch_ids: [1, B2] });
+    [["Fill Seller", "fill-sp@x.in", "salesperson"], ["Fill Manager", "fill-mg@x.in", "manager"], ["Fill Mover", "fill-mv@x.in", "stock_mover"]].forEach((u) => mkUser(u[0], u[1], u[2]));
+    const as = (email) => {
+        const t = fEnv.call("login", { email, password: "shop-pass-1" }).data.token;
+        return (a, p, b) => fEnv.call(a, p, t, b === undefined ? 1 : b);
+    };
+    const sp = as("fill-sp@x.in");
+    const mg = as("fill-mg@x.in");
+    const mv = as("fill-mv@x.in");
+    const spSold = sp("completeSale", { client_ref: "fill-sp-1", lines: [{ variant_id: FV, qty: 1 }], payments: [{ method: "cash", amount: 1000 }] });
+    check("salesperson: sells it as before", spSold.success, spSold.message);
+    const spVar = sp("getCatalog", {}).data.variants.find((v) => v.id === FV);
+    check("salesperson: the catalogue carries no Fill up to (as with cost), the rest as before", spVar && !("max_level" in spVar) && spVar.reorder_level === 10 && spVar.stock_qty === 6, spVar);
+    check("...nor does the app's first load", sp("bootstrap", {}).data.catalog.variants.every((v) => !("max_level" in v)));
+    const spLow = sp("dashboard", {}).data.low_stock.find((x) => x.variant_id === FV);
+    check("salesperson: Home still lists it as low, with no max_level or fill", spLow && spLow.stock_qty === 6 && !("fill" in spLow) && !("max_level" in spLow), spLow);
+    const spDc = sp("report", { type: "day_close" }).data;
+    const spItem = spDc.items.find((i) => i.variant_id === FV);
+    check("salesperson: their day close says refill, with no number", spItem && spItem.refill && !("fill" in spItem) && !("max_level" in spItem), spItem);
+    const spMail = fEnv.ctx.dayCloseMail_(spDc, {}, { salesperson: "Fill Seller", footer: "" });
+    check("...and so does its email copy", /<< REFILL$/m.test(spMail.text) && !/REFILL \d/.test(spMail.text) && />REFILL</.test(spMail.html), spMail.text);
+    const mgLow = mg("dashboard", {}).data.low_stock.find((x) => x.variant_id === FV);
+    check("manager: Home has the fill (30 − 6 = 24)", mgLow && mgLow.fill === 24 && mgLow.max_level === 30, mgLow);
+    check("manager: the catalogue carries Fill up to", mg("getCatalog", {}).data.variants.find((v) => v.id === FV).max_level === 30);
+    check("manager: the day close has the fill", mg("report", { type: "day_close" }).data.items.find((i) => i.variant_id === FV).fill === 24);
+    check("stock mover: the catalogue carries Fill up to (moving stock to where it is short is their job)", mv("getCatalog", {}).data.variants.find((v) => v.id === FV).max_level === 30);
+    fEnv.mails.length = 0;
+    fEnv.ctx.sendBranchDayCloses_(false, "test");
+    check("the nightly email (sent as the owner) still says how many: REFILL 24", fEnv.mails.some((m) => /<< REFILL 24\b/.test(m.body || "")), fEnv.mails.map((m) => m.subject));
+
+    // import: a blank cell keeps it; a value changes it; a bad pair skips the row
+    const imp = (o) => oc("importCatalog", { rows: [Object.assign({ brand: "", product: "Fill Test", size_label: "50ml", barcode: "FL1" }, o)] }, 1).data;
+    const i1 = imp({ max_level: "" });
+    check("import: blank max_level keeps it, nothing to update", i1.unchanged === 1 && !i1.errors.length && fv().max_level === 30, i1);
+    const i2 = imp({ max_level: "40" });
+    check("import: a value updates it", i2.updated === 1 && fv().max_level === 40, i2);
+    const i3 = imp({ max_level: "5" });
+    check("import: Fill up to under the alert skips the row with the reason", i3.errors.length === 1 && /Fill up to must be more/.test(i3.errors[0].message) && fv().max_level === 40, i3);
+    const i4 = imp({ reorder_level: "50" });
+    check("import: an alert raised above the saved Fill up to is refused too", i4.errors.length === 1 && fv().reorder_level === 10, i4);
+    const i5 = imp({ reorder_level: "", reorder_fallback: 2 });
+    check("import: a website-style row (no max_level column) leaves it alone", i5.unchanged === 1 && fv().max_level === 40, i5);
+    const i6 = oc("importCatalog", { rows: [{ brand: "", product: "Fill Test", category: "Eau De Parfum", size_label: "100ml", sell_price: 800, barcode: "FL3", reorder_level: 3, max_level: 12 }, { brand: "", product: "Fill Test", category: "Eau De Parfum", size_label: "10ml", sell_price: 100, barcode: "FL4" }] }, 1).data;
+    check("import: new sizes take the file's Fill up to, or none", i6.variants === 2 && fv("FL3").max_level === 12 && fv("FL4").max_level === 0, i6);
+
+    // a Sheet from before this version: asks for Setup; Setup adds the column; every size reads "not set"
+    const vSh = fEnv.ss.getSheetByName("Variants");
+    const vKeys = Object.keys(require("vm").runInContext("SCHEMA.Variants", fEnv.ctx));
+    const col = vKeys.length;
+    check("max_level is the last Variants column (Setup adds columns only at the end)", vKeys[col - 1] === "max_level");
+    const rng = vSh.getRange(1, col, vSh.getLastRow(), 1);
+    rng.setValues(rng.getValues().map(() => [""]));
+    const stale = oc("dashboard", {}, 1);
+    check("a Sheet without the column asks for Setup", !stale.success && stale.code === "SETUP", stale);
+    fEnv.ctx.setupSheets();
+    check("Setup adds the column back, and sizes read as not set", vSh.getRange(1, col).getValue() === "max_level" && low(1) && low(1).max_level === 0 && low(1).fill === 0, low(1));
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

@@ -86,6 +86,8 @@ function dayCloseMail_(d, s, opt) {
         .join("");
     // what was sold, with stock left — for refilling
     const qtyTxt = (q, unit) => r3_(q) + (unit === "ml" ? " ml" : "");
+    // "REFILL 22": how many to put back, where a "Fill up to" is set
+    const refillTxt = (it) => "REFILL" + (it.fill > 0 ? " " + qtyTxt(it.fill, it.unit) : "");
     const items = d.items || [];
     const refills = items.filter((it) => it.refill).length;
     const itemRows = items
@@ -94,7 +96,7 @@ function dayCloseMail_(d, s, opt) {
             (it.unit === "ml" ? "" : " " + escHtml_(it.size)) +
             (it.brand ? '<div style="font-size:11px;color:#7A716A">' + escHtml_(it.brand) + "</div>" : "") +
             "</td><td " + tdr + ">" + qtyTxt(it.qty, it.unit) + "</td><td " + tdr + ">" + qtyTxt(it.stock_left, it.unit) +
-            (it.refill ? '<div style="font-size:11px;font-weight:700;color:#C62828">REFILL</div>' : "") + "</td></tr>")
+            (it.refill ? '<div style="font-size:11px;font-weight:700;color:#C62828">' + refillTxt(it) + "</div>" : "") + "</td></tr>")
         .join("");
     const extra = [];
     d.voided.forEach((v) => extra.push("Voided " + escHtml_(v.invoice_no) + " (" + escHtml_(v.salesman_name) + ") " + inrText_(v.amount)));
@@ -159,7 +161,7 @@ function dayCloseMail_(d, s, opt) {
             .join("\n"),
         items.length ? "\nItems sold:" : "",
         items
-            .map((it) => "- " + it.name + (it.unit === "ml" ? "" : " " + it.size) + ": sold " + qtyTxt(it.qty, it.unit) + ", left " + qtyTxt(it.stock_left, it.unit) + (it.refill ? "  << REFILL" : ""))
+            .map((it) => "- " + it.name + (it.unit === "ml" ? "" : " " + it.size) + ": sold " + qtyTxt(it.qty, it.unit) + ", left " + qtyTxt(it.stock_left, it.unit) + (it.refill ? "  << " + refillTxt(it) : ""))
             .join("\n"),
         extra.length ? "\n" + extra.join("\n").replace(/<[^>]+>/g, "") : "",
         "",

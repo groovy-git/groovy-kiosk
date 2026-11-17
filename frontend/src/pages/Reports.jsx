@@ -383,6 +383,8 @@ function ItemsSold({ items, date }) {
               { key: "qty", label: "Sold" },
               { key: "stock_left", label: "Stock left" },
               { get: (i) => (i.refill ? "REFILL" : ""), label: "Refill" },
+              // only when the server sends it: a salesperson's day close has no fill numbers
+              ...(items.some((i) => "fill" in i) ? [{ get: (i) => (i.fill > 0 ? i.fill : ""), label: "To fill" }] : []),
             ]}
           />
         )}
@@ -404,7 +406,11 @@ function ItemsSold({ items, date }) {
                 <td className="num">{qty(i.qty, i.unit)}</td>
                 <td className="num">
                   {qty(i.stock_left, i.unit)}
-                  {i.refill && <div><span className="badge bad">Refill</span></div>}
+                  {i.refill && (
+                    <div>
+                      <span className="badge bad">Refill{i.fill > 0 ? ` ${qty(i.fill, i.unit)}` : ""}</span>
+                    </div>
+                  )}
                 </td>
               </tr>
             ))}

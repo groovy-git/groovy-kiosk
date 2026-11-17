@@ -5,11 +5,11 @@ import { api } from "../lib/api";
 import { useCachedFetch } from "../lib/cached";
 import { runBusy } from "../lib/busy";
 import { navigate, useRoute } from "../lib/router";
-import { searchItems, lookupBarcode } from "../lib/catalog";
+import { searchItems, lookupBarcode, isLow, fillQty } from "../lib/catalog";
 import { PAGE, MIN_SEARCH, useSearchQuery, useMoreOnScroll } from "../lib/listing";
 import { inr, fmtDateTime, qtyLabel, r3, plural, istDate } from "../lib/format";
 import { beepError, beepOk } from "../lib/feedback";
-import { parseCSV, downloadText, IMPORT_TEMPLATE, isWebsiteExport, fromWebsiteExport, catalogToImportCSV, withoutInfoColumns, importParts, checkImport } from "../lib/files";
+import { parseCSV, downloadText, IMPORT_TEMPLATE, isWebsiteExport, fromWebsiteExport, catalogToImportCSV, withoutInfoColumns, importParts, checkImport, refillListCSV } from "../lib/files";
 import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
 import TopBar from "../components/TopBar";
 import CameraScanner from "../components/CameraScanner";
@@ -43,7 +43,9 @@ export default function Stock({ tab }) {
 }
 
 function Products() {
-  const { catalog, isManager, isMover, toast, multiBranch } = useApp();
+  const { catalog, isManager, isMover, toast, multiBranch, branchId, branches } = useApp();
+  // the stock shown is one shelf — not "All branches", which adds up every shop's
+  const shelf = !multiBranch || !!branchId;
   const route = useRoute();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState(route.params.get("filter") || "all");
@@ -56,7 +58,7 @@ function Products() {
 
   const list = useMemo(() => {
     let l = catalog.items;
-    if (filter === "low") l = l.filter((i) => i.active && (i.stock <= 0 || (i.reorder > 0 && i.stock <= i.reorder)));
+    if (filter === "low") l = l.filter((i) => i.active && isLow(i));
     else if (filter === "out") l = l.filter((i) => i.active && i.stock <= 0);
     else if (filter === "hidden") l = l.filter((i) => !i.active);
     else l = l.filter((i) => i.active);
@@ -65,6 +67,15 @@ function Products() {
 
   // a new search or pill starts from the top again
   useEffect(() => setShown(PAGE), [query, filter]);
+
+  // every low item on the screen (not only the ones scrolled to), in the "Export all products" columns
+  // so the file can be edited and imported back, plus how many to put back
+  const downloadRefill = () => {
+    const b = branches.find((x) => x.id === branchId);
+    const slug = b ? b.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") : "";
+    downloadText(`refill-${slug ? slug + "-" : ""}${istDate()}.csv`, refillListCSV(catalog, list, branches, b));
+    toast(`Refill list: ${plural("item", list.length)}`, "success");
+  };
   const more = useMoreOnScroll(shown < list.length, () => setShown((n) => n + PAGE));
 
   const onCode = (code) => {
@@ -104,6 +115,12 @@ function Products() {
           ]}
         />
       </div>
+      {/* for whoever brings stock in or across (a salesperson is not sent "Fill up to" at all) */}
+      {filter === "low" && list.length > 0 && (isManager || isMover) && (
+        <button className="btn secondary block mt" onClick={downloadRefill} disabled={!shelf}>
+          <Download size={18} /> {shelf ? `Download refill list (${list.length})` : "Refill list: choose a branch first"}
+        </button>
+      )}
       {isManager && (
         <div className="row mt">
           <button className="btn dark grow" onClick={() => navigate("stock/in")}>
@@ -143,7 +160,7 @@ function Products() {
                   {it.unit === "ml" ? "/ml" : ""}
                 </div>
               </div>
-              <StockBadge item={it} />
+              <StockBadge item={it} showFill={shelf} />
             </button>
           ))}
           {shown < list.length && <div ref={more} className="small muted center" style={{ padding: "12px 0" }}>Loading more…</div>}
@@ -177,6 +194,13 @@ function ItemSheet({ item, onClose }) {
   const live = item ? catalog.byVariant.get(item.id) || item : null;
 
   if (!item) return null;
+  const shelf = !multiBranch || !!branchId;
+  // "Kalyani Nagar 3 (fill 27)": each branch is its own shelf, so this also works from "All branches"
+  const atBranch = (b) => {
+    const q = live.stockBy[b.id] || 0;
+    const f = fillQty(live, q);
+    return `${b.name} ${qtyLabel(q, live.unit)}${f ? ` (fill ${qtyLabel(f, live.unit)})` : ""}`;
+  };
   const loadMoves = async () => {
     setMoves("loading");
     try {
@@ -193,7 +217,7 @@ function ItemSheet({ item, onClose }) {
         <div className="grow">
           <div className="brand-label">{live.brand}</div>
           <div className="bold">{live.size}</div>
-          <StockBadge item={live} />
+          <StockBadge item={live} showFill={shelf} />
         </div>
       </div>
       <div className="card">
@@ -207,8 +231,16 @@ function ItemSheet({ item, onClose }) {
             <span className="right small">
               {branches
                 .filter((b) => b.id !== branchId)
-                .map((b) => `${b.name} ${qtyLabel(live.stockBy[b.id] || 0, live.unit)}`)
+                .map(atBranch)
                 .join(" · ")}
+            </span>
+          </div>
+        )}
+        {(isManager || isMover) && (live.reorder > 0 || live.max > 0) && (
+          <div className="kv">
+            <span className="k">Low alert · Fill up to</span>
+            <span>
+              {live.reorder > 0 ? qtyLabel(live.reorder, live.unit) : "—"} · {live.max > 0 ? qtyLabel(live.max, live.unit) : "—"}
             </span>
           </div>
         )}
@@ -454,8 +486,11 @@ function ImportSheet({ open, onClose }) {
         warns when stock runs low. Anything already saved here — a barcode, a reorder level you set — is never replaced.
         <br />
         To change many products at once: export all products, change prices or details in Excel or Google Sheets, save as CSV and choose that file here. A file can change
-        prices, MRP, cost, reorder level, category, gender, HSN, GST and image. It cannot rename a product, brand or size, change a barcode or SKU that is already set, hide
+        prices, MRP, cost, reorder level, Fill up to (max_level), category, gender, HSN, GST and image. It cannot rename a product, brand or size, change a barcode or SKU that is already set, hide
         or delete a product, or change stock; the columns starting with “info_” are only for reading.
+        <br />
+        The refill list (Low stock → Download refill list) is the same file for just the low and out-of-stock items: change reorder_level or max_level (Fill up to)
+        there and choose it here the same way.
       </p>
       <button className="btn secondary block" onClick={exportAll} disabled={!catalog.items.length}>
         <Download size={18} /> Export all products
