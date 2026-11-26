@@ -54,6 +54,7 @@ function actions_() {
     movements: { fn: apiMovements_, roles: ALL_ },
     emailDayClose: { fn: apiEmailDayClose_, roles: ALL_ }, // salesperson gets own figures only
     addReview: { fn: apiAddReview_, roles: ALL_ }, // a Google review taken at the kiosk (reviews.gs)
+    cashNow: { fn: apiCashNow_, roles: ALL_ }, // Home's Cash in drawer card (cash.gs); a salesperson gets the one number
 
     // owner + manager
     saveBrand: { fn: apiSaveBrand_, roles: AM_ },
@@ -75,9 +76,12 @@ function actions_() {
     voidSale: { fn: apiVoidSale_, roles: AM_ },
     returnItems: { fn: apiReturnItems_, roles: ALL_ }, // a salesperson is held to salesperson_max_return, not kept out by the role
     exchange: { fn: apiExchange_, roles: ALL_ }, // the cap here is on cash handed back, not on the swap
-    listExpenses: { fn: apiListExpenses_, roles: AM_ },
-    saveExpense: { fn: apiSaveExpense_, roles: AM_ },
+    // a salesperson adds cash paid from the drawer today and sees their own (rules in expenses.gs);
+    // changing or deleting one stays with managers and the owner
+    listExpenses: { fn: apiListExpenses_, roles: ALL_ },
+    saveExpense: { fn: apiSaveExpense_, roles: ALL_ },
     deleteExpense: { fn: apiDeleteExpense_, roles: AM_ },
+    cashBook: { fn: apiCashBook_, roles: AM_ }, // the drawer and the owner's counts (cash.gs); managers only look
 
     // owner only
     listUsers: { fn: apiListUsers_, roles: A_ },
@@ -89,6 +93,8 @@ function actions_() {
     listBranches: { fn: apiListBranches_, roles: A_ },
     saveBranch: { fn: apiSaveBranch_, roles: A_ },
     setReviewCounted: { fn: apiSetReviewCounted_, roles: A_ }, // only the owner says a review doesn't count
+    cashEntry: { fn: apiCashEntry_, roles: A_ }, // only the owner counts, takes or puts in cash
+    undoCash: { fn: apiUndoCash_, roles: A_ },
     };
     return ACTIONS_CACHE_;
 }
@@ -109,6 +115,7 @@ const READ_ACTIONS_ = {
     bootstrap: 1, getCatalog: 1, getStock: 1, dashboard: 1, listSales: 1, getSale: 1, report: 1, listCustomers: 1, findCustomer: 1,
     listHeld: 1, movements: 1, listExpenses: 1, listUsers: 1, listLogs: 1, customerHistory: 1, listSellers: 1,
     getSettings: 1, stockInBatches: 1, listTransfers: 1, listBranches: 1, me: 1, ping: 1, loginOptions: 1,
+    cashBook: 1, cashNow: 1,
 };
 
 /**

@@ -37,27 +37,42 @@ export function useCachedFetch(key, run, deps, onError) {
   const errRef = useRef(onError);
   errRef.current = onError;
   const [nonce, setNonce] = useState(0);
+  // the load whose answer may still be shown; replace() moves it on, so a load asked for before a save
+  // can't come back after it and put the older figures on screen again
+  const seq = useRef(0);
 
   useEffect(() => {
     let live = true;
+    const mine = ++seq.current;
+    const current = () => live && seq.current === mine;
     setData(read(key)); // whatever this filter showed last time, straight away
     setLoading(true);
     runRef.current()
       .then((d) => {
-        if (!live) return;
+        if (!current()) return;
         setData(d);
         write(key, d);
       })
       .catch((e) => {
-        if (!live) return;
+        if (!current()) return;
         if (errRef.current) errRef.current(e);
       })
-      .finally(() => live && setLoading(false));
+      .finally(() => current() && setLoading(false));
     return () => {
       live = false;
     };
   }, [key, nonce, ...deps]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const reload = useCallback(() => setNonce((n) => n + 1), []);
-  return { data, loading, reload };
+  // a save answered with the screen's new figures: show them now, and let no older load overwrite them
+  const replace = useCallback(
+    (d) => {
+      seq.current++;
+      setData(d);
+      write(key, d);
+      setLoading(false);
+    },
+    [key],
+  );
+  return { data, loading, reload, replace };
 }

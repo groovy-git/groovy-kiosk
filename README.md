@@ -14,7 +14,8 @@ Staff phones (installed app)  ──►  Google Apps Script (backend)  ──►
 - **Four roles:**
     - **Owner**: everything.
     - **Manager**: stock, returns of any size, expenses, reports.
-    - **Salesperson**: billing, with a discount limit (an offer you have set up can go beyond it), and returns up to a rupee limit you set.
+    - **Salesperson**: billing, with a discount limit (an offer you have set up can go beyond it), returns up to a rupee limit you set, and cash they pay from the drawer today (tea, courier).
+    - **Cash at kiosk:** only the owner counts and takes cash from a drawer; managers can look.
     - **Stock Mover**: sees products and stock at the branches you tick, moves stock between branches and adjusts stock (damage, a corrected count). No billing, and no sales, customers, expenses or reports.
     - Owner, managers and salespeople can all sell, and every bill records who sold it.
     - **Customer numbers are the owner's.** Managers and salespeople see them masked (7709974667 shows as 77XX9XX667) on the Customers screen, on bills, on bills held by someone else and in reports. They cannot add, edit, call, chat with or save a customer to their phone. A number they type at checkout shows in full on that bill's receipt. Only the owner has the WhatsApp button (after a sale and on a bill).
@@ -177,6 +178,17 @@ The app prints an **80 mm receipt** or an **A4 tax invoice** using the phone's o
     - **Why it stays quick:** finished months are worked out once and kept; expenses are always counted fresh.
     - **Recalculate from the bills** (owner only): use it if the Google Sheet is ever edited by hand; it works the kept months out again.
 - **End of day:** go to **More → Reports → Day close**. It shows the cash you should have in the drawer and a breakdown by salesperson.
+- **Cash at kiosk (owner; managers can look):** UPI and card go to the bank; cash waits in the drawer until you collect it. **More → Cash at kiosk** shows what should be in the branch's drawer now: what you left at your last count, plus cash sales, less cash refunds, voids and cash expenses since.
+    - **Start:** count the drawer once (**Count the drawer**). The app counts on from that amount; nothing before it matters.
+    - **Collecting cash:** **Count & take cash**. Count every note and coin and enter it: if it differs from what the app expected, it is kept as **short** or **extra**, and the drawer starts again from what you counted. Enter what you take (for example ₹2,000 of ₹2,400) and the app shows what stays at the kiosk (₹400). Choose who handed it over.
+    - **Cash expenses since the count** are listed on the screen with who added each one, so you can check them as you count.
+    - **Count only** checks the drawer without taking anything. **Put cash in** is for change you bring.
+    - **Undo** removes the latest entry only, if you typed it wrong.
+    - **Taking cash is not an expense.** It doesn't change Profit or Expenses.
+    - **Cash from your own pocket:** when you or a manager add a Cash expense, **Paid from the kiosk drawer** is ticked. Untick it for rent or salary you pay from your pocket: it still counts as an expense in Profit, but the drawer doesn't expect that cash to be gone. Expenses entered before this update count as from the drawer.
+    - **Where it shows:** a **Cash in drawer** card on Home (on **All branches**, one line per branch), and **In the drawer now** under today's day close and in the day-close email. Salespeople see the one figure on Home, so they can check the drawer before you arrive.
+    - **After this update:** run **Groovy Kiosk → 1. Setup / repair sheets** once. It adds the `Cash_Book` tab, where every count is kept, and the `not_drawer` column to Expenses.
+- **Cash spent from the drawer (salespeople):** **More → Expenses → + Expense** for tea, a courier and so on: cash, today, at their branch. It lowers the cash expected in the drawer, so it doesn't show as short when you count. Each salesperson sees only their own, and only today's: not other salespeople's, and not the expenses you or a manager add. To change or delete one, a manager or the owner does it in **Expenses**.
 
 ## Branches (more than one shop)
 

@@ -1,5 +1,5 @@
 import { Component, Suspense, useEffect } from "react";
-import { Home as HomeIcon, ShoppingBag, Receipt, Boxes, Menu, Users, BarChart3, Wallet, Settings as Cog, LogOut, UserCircle, History, Package, ArrowRightLeft } from "lucide-react";
+import { Home as HomeIcon, ShoppingBag, Receipt, Boxes, Menu, Users, BarChart3, Wallet, Settings as Cog, LogOut, UserCircle, History, Package, ArrowRightLeft, Banknote } from "lucide-react";
 import { useApp } from "./store";
 import { useRoute, navigate } from "./lib/router";
 import { Toasts, Spinner, SkeletonList, Empty, Sheet } from "./components/ui";
@@ -19,6 +19,7 @@ const StockIn = lazyScreen(() => import("./pages/StockIn"));
 const Transfer = lazyScreen(() => import("./pages/Transfer"));
 const Customers = lazyScreen(() => import("./pages/Customers"));
 const Expenses = lazyScreen(() => import("./pages/Expenses"));
+const Cash = lazyScreen(() => import("./pages/Cash"));
 const Reports = lazyScreen(() => import("./pages/Reports"));
 const More = lazyScreen(() => import("./pages/More"));
 const UsersPage = lazyScreen(() => import("./pages/Users"));
@@ -38,6 +39,7 @@ const PRELOAD = [
   () => import("./pages/ProductForm"),
   () => import("./pages/StockIn"),
   () => import("./pages/Expenses"),
+  () => import("./pages/Cash"),
   () => import("./pages/Account"),
   () => import("./pages/Users"),
   () => import("./pages/Settings"),
@@ -199,7 +201,8 @@ function WeakPassword() {
 // who may open which page (server enforces the same rules on every action)
 const ACCESS = {
   home: "all", sell: "all", sales: "all", customers: "all", more: "all", account: "all", reports: "all", stock: "all",
-  expenses: "mgr", users: "owner", settings: "owner", logs: "owner",
+  // a salesperson's Expenses is cash paid from the drawer today, their own (the server holds them to it)
+  expenses: "all", cash: "mgr", users: "owner", settings: "owner", logs: "owner",
 };
 // a stock mover's whole app: products with their stock, moving stock, and their own account.
 // Named one by one, so a screen added later stays closed to them until it is listed here.
@@ -219,6 +222,7 @@ function Page({ route }) {
       return <Stock tab={parts[1]} />;
     case "customers": return <Customers />;
     case "expenses": return <Expenses />;
+    case "cash": return <Cash />;
     case "reports": return <Reports />;
     case "more": return <More />;
     case "users": return <UsersPage />;
@@ -256,7 +260,7 @@ export default function App() {
   // (adding a product, Stock In) opens the product list
   const moverTab = isMover && route.page === "stock" && MOVER_STOCK_TABS.includes(route.parts[1]) ? route.parts[1] : "";
   const parts = isMover && page === "stock" ? ["stock", moverTab].filter(Boolean) : route.parts;
-  const section = ["users", "settings", "logs", "account", "customers", "expenses", "reports"].includes(page) ? "more" : page;
+  const section = ["users", "settings", "logs", "account", "customers", "expenses", "cash", "reports"].includes(page) ? "more" : page;
   const active = moverTab === "transfer" ? "stock/transfer" : section;
   const here = isMover ? active : page; // the sidebar's highlighted row
 
@@ -282,7 +286,8 @@ export default function App() {
     { id: "sales", label: isManager ? "Sales" : "My Sales", icon: Receipt },
     { id: "stock", label: isManager ? "Stock" : "Products", icon: Boxes },
     { id: "customers", label: "Customers", icon: Users },
-    isManager && { id: "expenses", label: "Expenses", icon: Wallet },
+    { id: "expenses", label: "Expenses", icon: Wallet },
+    isManager && { id: "cash", label: "Cash at kiosk", icon: Banknote },
     { id: "reports", label: "Reports", icon: BarChart3 },
     isAdmin && { id: "users", label: "Staff", icon: UserCircle },
     isAdmin && { id: "settings", label: "Settings", icon: Cog },

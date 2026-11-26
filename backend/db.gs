@@ -216,6 +216,28 @@ function lastMatchingRows_(name, field, value, n, tail) {
         .slice(-n);
 }
 
+/**
+ * The rows with id ≥ fromId, read from the end of the sheet. For tables whose rows are only ever added,
+ * in id order — Payments, Sales: nothing empties their rows, and nextId_ already takes the last row's id
+ * as the highest. On Google a read costs by the rows it spans, so this reads just those rows instead of
+ * the whole id column that windowRows_ needs. If the rows turn out not to run in id order (a sheet sorted
+ * by hand), it falls back to windowRows_, which finds them wherever they are.
+ */
+function rowsFromId_(name, fromId) {
+    if (REQ_CACHE_[name]) return REQ_CACHE_[name].rows.filter((r) => r.id >= fromId);
+    const sh = sheet_(name);
+    const keys = cols_(name);
+    const last = sh.getLastRow();
+    if (last < 2) return [];
+    headerCell_(sh, name, keys[keys.length - 1]);
+    // In id order with no gaps — what nextId_ and appendRows_ make — id n sits on row n + 1. Read from there
+    // to the end, with 20 rows before it to see that they do run in order (also when none are wanted).
+    const start = Math.max(2, Math.min(last, fromId + 1) - 20);
+    const rows = rowsFromValues_(name, sh.getRange(start, 1, last - start + 1, keys.length).getValues(), start);
+    const inOrder = rows.length === last - start + 1 && rows.every((r, i) => r.id === rows[0].id + i) && (start === 2 || rows[0].id < fromId);
+    return inOrder ? rows.filter((r) => r.id >= fromId) : windowRows_(name, "id", fromId, null);
+}
+
 /** One row by id, without reading the whole table to find it. */
 function findById_(name, id) {
     const n = Number(id);

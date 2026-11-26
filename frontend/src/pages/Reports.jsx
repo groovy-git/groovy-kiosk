@@ -184,9 +184,20 @@ function Report({ type, d, reload, onMonth }) {
               ))}
             </tbody>
           </table>
-          {d.cash_expenses > 0 && <div className="kv small mt"><span className="k">Cash expenses paid</span><span>−{inr(d.cash_expenses)}</span></div>}
-          <div className="kv total"><span>Cash in drawer</span><span>{inr(expected)}</span></div>
-          <div className="tiny muted">Expected cash from today's sales (add your opening cash float).</div>
+          {d.cash_expenses > 0 && <div className="kv small mt"><span className="k">Paid from the drawer</span><span>−{inr(d.cash_expenses)}</span></div>}
+          {/* once the owner has counted the drawer, it carries on from that count (Cash at kiosk) */}
+          {d.drawer && d.drawer.started ? (
+            <>
+              <div className="kv small mt"><span className="k">Today's cash</span><span>{inr(expected)}</span></div>
+              <div className="kv total"><span>In the drawer now</span><span>{inr(d.drawer.now)}</span></div>
+              <div className="tiny muted">Expected, counting on from the last count on {fmtDateTime(d.drawer.since_at)}.</div>
+            </>
+          ) : (
+            <>
+              <div className="kv total"><span>Cash in drawer</span><span>{inr(expected)}</span></div>
+              <div className="tiny muted">Expected cash from today's sales (add your opening cash float).</div>
+            </>
+          )}
         </div>
         {(d.by_branch || []).length > 0 && (
           <div className="card mt">
@@ -349,7 +360,7 @@ function Report({ type, d, reload, onMonth }) {
       <>
         <Stat cls="brown" label="Total expenses" value={inr(d.total)} />
         <div className="card mt">
-          <div className="card-title"><h3>By category</h3><Csv name={`expenses-${d.from}-${d.to}`} rows={d.rows} cols={[{ key: "date", label: "Date" }, { key: "category", label: "Category" }, { key: "title", label: "Title" }, { key: "amount", label: "Amount" }, { key: "method", label: "Paid by" }]} /></div>
+          <div className="card-title"><h3>By category</h3><Csv name={`expenses-${d.from}-${d.to}`} rows={d.rows.map((r) => ({ ...r, paid_by: r.method === "cash" && r.from_drawer === false ? "cash (not drawer)" : r.method }))} cols={[{ key: "date", label: "Date" }, { key: "category", label: "Category" }, { key: "title", label: "Title" }, { key: "amount", label: "Amount" }, { key: "paid_by", label: "Paid by" }]} /></div>
           {d.by_category.map((c) => (
             <div key={c.category} className="mb">
               <div className="row between small"><b>{c.category}</b><span>{inr(c.amount)}</span></div>

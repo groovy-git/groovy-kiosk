@@ -1,4 +1,4 @@
-import { Users, Wallet, BarChart3, UserCog, Settings, History, KeyRound, LogOut, ChevronRight, Smartphone, Package } from "lucide-react";
+import { Users, Wallet, BarChart3, UserCog, Settings, History, KeyRound, LogOut, ChevronRight, Smartphone, Package, Banknote } from "lucide-react";
 import { useApp } from "../store";
 import { navigate } from "../lib/router";
 import { ROLE_LABEL } from "../lib/format";
@@ -13,7 +13,8 @@ export default function More() {
   const items = isMover ? [account] : [
     { id: "customers", label: "Customers", sub: "Phone numbers & purchase history", icon: Users },
     !isManager && { id: "stock", label: "Products", sub: "Prices & stock", icon: Package },
-    isManager && { id: "expenses", label: "Expenses", sub: "Rent, salary, tea & more", icon: Wallet },
+    { id: "expenses", label: "Expenses", sub: isManager ? "Rent, salary, tea & more" : "Cash paid from the drawer today", icon: Wallet },
+    isManager && { id: "cash", label: "Cash at kiosk", sub: isAdmin ? "Cash in the drawer, count & take it" : "Cash in the drawer", icon: Banknote },
     { id: "reports", label: "Reports", sub: isManager ? "Day close, salespeople, GST, profit" : "My day close & performance", icon: BarChart3 },
     isAdmin && { id: "users", label: "Staff", sub: "Salespeople, managers & logins", icon: UserCog },
     isAdmin && { id: "settings", label: "Settings", sub: "Shop details, GST, discounts, categories", icon: Settings },

@@ -1,18 +1,85 @@
-import { useEffect, useState } from "react";
-import { ShoppingBag, AlertTriangle, Trophy, RefreshCw, ChevronRight } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ShoppingBag, AlertTriangle, Trophy, RefreshCw, ChevronRight, Banknote } from "lucide-react";
 import { useApp, takeLoginDashboard } from "../store";
 import { api } from "../lib/api";
 import { navigate } from "../lib/router";
-import { inr, fmtDate, istDate, METHOD_LABEL, plural, ROLE_LABEL } from "../lib/format";
+import { inr, fmtDate, fmtDateTime, istDate, METHOD_LABEL, plural, ROLE_LABEL } from "../lib/format";
 import TopBar from "../components/TopBar";
 import { Seg, SkeletonList } from "../components/ui";
 import BarChart from "../components/BarChart";
+
+/**
+ * The cash expected in the drawer (backend/cash.gs). Owner and managers: tap through to Cash at kiosk.
+ * A salesperson: the one number, once the owner has counted the drawer.
+ * `c` is the answer to cashNow, asked for alongside Home's own figures: null until it arrives (and if it
+ * fails, the card simply isn't shown).
+ */
+function CashCard({ c, isManager, isAdmin, isAllBranches }) {
+  const tap = { width: "100%", border: 0, cursor: "pointer", textAlign: "left" };
+  if (!c) return null;
+  if (c.branches) {
+    if (!isAllBranches) return null; // an answer for "All branches" kept from before a branch switch
+    return (
+      <button className="card mt" style={tap} onClick={() => navigate("cash")}>
+        <div className="card-title">
+          <h3 className="row gap-s">
+            <Banknote size={18} color="var(--brown)" /> Cash in drawers
+          </h3>
+          <ChevronRight size={18} color="var(--muted)" />
+        </div>
+        {c.branches.map((b) => (
+          <div key={b.branch_id} className="kv small">
+            <span>{b.name}</span>
+            <b className="money">{b.started ? inr(b.now) : <span className="muted">Not counted yet</span>}</b>
+          </div>
+        ))}
+      </button>
+    );
+  }
+  if (!c.started) {
+    if (!isAdmin) return null;
+    return (
+      <button className="card mt row" style={tap} onClick={() => navigate("cash")}>
+        <div className="avatar">
+          <Banknote size={20} />
+        </div>
+        <div className="grow">
+          <div className="bold">Track the cash in the drawer</div>
+          <div className="small muted">Count it once and the app keeps the total from then on</div>
+        </div>
+        <ChevronRight size={18} color="var(--muted)" />
+      </button>
+    );
+  }
+  const body = (
+    <>
+      <div className="avatar">
+        <Banknote size={20} />
+      </div>
+      <div className="grow">
+        <div className="small muted bold">Cash in drawer</div>
+        <div className="serif bold money" style={{ fontSize: 21 }}>
+          {inr(c.now)}
+        </div>
+        <div className="tiny muted">{c.since_at ? `Expected · since the count on ${fmtDateTime(c.since_at)}` : "What should be in the drawer now"}</div>
+      </div>
+    </>
+  );
+  return isManager ? (
+    <button className="card mt row" style={tap} onClick={() => navigate("cash")}>
+      {body}
+      <ChevronRight size={18} color="var(--muted)" />
+    </button>
+  ) : (
+    <div className="card mt row">{body}</div>
+  );
+}
 
 // role pill next to the greeting — brown for the owner, gold for manager, cream for salesperson
 const ROLE_TONE = { owner: "dark", admin: "dark", manager: "gold", salesperson: "" }; // a stale cached role still gets its colour
 
 export default function Home() {
-  const { user, isManager, toast, settings, branchId, isAllBranches } = useApp();
+  const { user, isManager, isAdmin, toast, settings, branchId, isAllBranches } = useApp();
   const [d, setD] = useState(() => {
     try {
       return JSON.parse(sessionStorage.getItem("gp_dash_" + branchId) || "null");
@@ -22,8 +89,34 @@ export default function Home() {
   });
   const [board, setBoard] = useState("today");
   const [loading, setLoading] = useState(false);
+  // the cash in the drawer (Cash at kiosk), asked for on its own so Home's figures never wait for it
+  const cashKey = "gp_cashnow_" + branchId;
+  const [cash, setCash] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(cashKey) || "null");
+    } catch {
+      return null;
+    }
+  });
+  const cashFor = useRef(cashKey); // the branch on screen: an answer for another one is kept, not shown
+  cashFor.current = cashKey;
+  const loadCash = () => {
+    const k = cashKey;
+    try {
+      setCash(JSON.parse(sessionStorage.getItem(k) || "null")); // this branch's last answer, straight away
+    } catch {
+      setCash(null);
+    }
+    api("cashNow")
+      .then((r) => {
+        sessionStorage.setItem(k, JSON.stringify(r.data));
+        if (cashFor.current === k) setCash(r.data);
+      })
+      .catch(() => {}); // the card just stays as it was; Home's own figures say if something is wrong
+  };
 
   const load = async () => {
+    loadCash();
     setLoading(true);
     try {
       // right after logging in, the figures were already asked for alongside the shop's data
@@ -133,6 +226,8 @@ export default function Home() {
                 <div className="value">{d.today.samples || 0}</div>
               </div>
             </div>
+
+            <CashCard c={cash} isManager={isManager} isAdmin={isAdmin} isAllBranches={isAllBranches} />
 
             {isAllBranches && d.by_branch && (
               <div className="card mt">

@@ -3340,5 +3340,282 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("Setup adds the column back, and sizes read as not set", vSh.getRange(1, col).getValue() === "max_level" && low(1) && low(1).max_level === 0 && low(1).fill === 0, low(1));
 }
 
+// ---- cash at the kiosk: the drawer counted on from the owner's last count (cash.gs) ----
+{
+    const kEnv = createEnv();
+    kEnv.ctx.setupSheets();
+    const kPwd = /Password: (\S+)/.exec(kEnv.alerts.pop())[1];
+    const KT = kEnv.call("login", { email: "owner@groovy.test", password: kPwd }).data.token;
+    const kc = (a, p, t, b, rq) => kEnv.call(a, p, t || KT, b === undefined ? 1 : b, rq);
+    const kCat = kc("bootstrap", {}).data.catalog.categories[0].id;
+    const kMake = (name, code, price) => {
+        kc("saveProduct", { name, category_id: kCat, gst_rate: 18, variants: [{ size_label: "50ml", mrp: price, sell_price: price, cost: price / 2, opening_stock: 40, barcode: code }] });
+        return kc("getCatalog", {}).data.variants.find((v) => v.barcode === code).id;
+    };
+    const K1000 = kMake("Cash Thousand", "CK1", 1000);
+    const K500 = kMake("Cash Five Hundred", "CK5", 500);
+    const KB2 = kc("saveBranch", { name: "Cash Two", code: "C2" }, KT, 0).data.id;
+    kc("saveUser", { name: "Cash Sp", email: "cash-sp@x.in", role: "salesperson", password: "shop-pass-1", branch_id: 1, branch_ids: [1] }, KT, 0);
+    kc("saveUser", { name: "Cash Mgr", email: "cash-mgr@x.in", role: "manager", password: "shop-pass-2", branch_id: 1, branch_ids: [1] }, KT, 0);
+    kc("saveUser", { name: "Cash Two Sp", email: "cash-sp2@x.in", role: "salesperson", password: "shop-pass-3", branch_id: KB2, branch_ids: [KB2] }, KT, 0);
+    kc("saveUser", { name: "Cash Mover", email: "cash-mv@x.in", role: "stock_mover", password: "shop-pass-4", branch_id: 1 }, KT, 0);
+    const KSP = kEnv.call("login", { email: "cash-sp@x.in", password: "shop-pass-1" }).data.token;
+    const KMG = kEnv.call("login", { email: "cash-mgr@x.in", password: "shop-pass-2" }).data.token;
+    const KSP2 = kEnv.call("login", { email: "cash-sp2@x.in", password: "shop-pass-3" }).data.token;
+    const KMV = kEnv.call("login", { email: "cash-mv@x.in", password: "shop-pass-4" }).data.token;
+    let kRef = 0;
+    const kSell = (variant, method, token, branch) =>
+        kc("completeSale", { client_ref: "ck" + ++kRef, lines: [{ variant_id: variant, qty: 1 }], payments: [{ method, amount: method === "cash" ? 5000 : variant === K1000 ? 1000 : 500 }] }, token || KSP, branch);
+    const book = (b) => kc("cashBook", {}, KT, b).data;
+    const drawer = (b) => book(b === undefined ? 1 : b).branches[0];
+    const entry = (p, b, rq) => kc("cashEntry", p, KT, b, rq);
+    const today = kEnv.ctx.todayStr_();
+    const yesterday = kEnv.ctx.daysAgoStr_(1);
+
+    // before the owner has counted anything
+    check("cash: a cash sale before the first count", kSell(K1000, "cash").success);
+    check("cash: not started — the book says so", drawer().started === false && book(1).entries.length === 0, drawer());
+    check("cash: not started — the owner's Home asks for a count", kc("cashNow", {}).data.started === false, kc("cashNow", {}).data);
+    check("cash: not started — a salesperson's Home is told so, and shows nothing", sameData(kc("cashNow", {}, KSP).data, { started: false }));
+    check("cash: Home's own figures carry no cash any more (asked for separately)", kc("dashboard", {}).data.cash === undefined && kc("dashboard", {}).data.cash_by_branch === undefined);
+    check("cash: a stock mover can't ask for it", kc("cashNow", {}, KMV).code === "FORBIDDEN");
+    check("cash: not started — the day close says so", kc("report", { type: "day_close" }).data.drawer.started === false);
+    check("cash: putting cash in before a count is refused", /Count the drawer first/.test(entry({ type: "add", amount: 100 }).message));
+    check("cash: a salesperson can't read the book", kc("cashBook", {}, KSP).code === "FORBIDDEN");
+    check("cash: nor can a stock mover", kc("cashBook", {}, KMV).code === "FORBIDDEN");
+    check("cash: a manager can't count or take", kc("cashEntry", { type: "count", counted: 10 }, KMG).code === "FORBIDDEN" && kc("undoCash", { id: 1 }, KMG).code === "FORBIDDEN");
+    check("cash: a count needs the counted cash", /Count the cash in the drawer/.test(entry({ type: "count", counted: "" }).message));
+    check("cash: no negative counts", /cannot be negative/.test(entry({ type: "count", counted: -5 }).message));
+    check("cash: no crore-sized slips", /more than a drawer holds/.test(entry({ type: "count", counted: 10000000 }).message));
+    check("cash: needs a branch on All branches", /Choose a branch/.test(entry({ type: "count", counted: 5 }, 0).message));
+
+    // the first count: the app starts from what is there; the sale before it doesn't count
+    const c1 = entry({ type: "count", counted: 500 });
+    check("cash: the first count", c1.success && /starts from ₹500/.test(c1.message), c1.message);
+    check("...the drawer is what was counted", drawer().now === 500 && drawer().left === 500 && drawer().cash_in === 0, drawer());
+    check("...marked as the first, nothing short or extra", c1.data.entries[0].first && c1.data.entries[0].latest && c1.data.entries[0].difference === 0, c1.data.entries[0]);
+    kEnv.ctx.resetReqCache_();
+    check("...logged", kEnv.ctx.rows_("Activity_Logs").some((l) => l.action === "CASH" && /Counted ₹500/.test(l.details)));
+
+    // sales, a refund and expenses move it — cash only, this branch only
+    const s1 = kSell(K1000, "cash");
+    check("cash: a cash sale (change given) adds the bill, not the note handed over", s1.success && drawer().now === 1500 && drawer().cash_in === 1000, drawer());
+    kSell(K500, "upi");
+    kSell(K1000, "card");
+    check("...UPI and card don't touch it", drawer().now === 1500, drawer());
+    const s5 = kSell(K500, "cash");
+    check("...another cash sale", drawer().now === 2000, drawer());
+    const rt = kc("returnItems", { sale_id: s5.data.sale.id, items: [{ sale_item_id: s5.data.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "Changed mind" }, KMG);
+    check("cash: a cash refund takes it out", rt.success && drawer().now === 1500 && drawer().cash_out === 500, [rt.message, drawer()]);
+    const sx = kc("saveExpense", { title: "Tea", category: "Tea & Snacks", amount: 100, method: "cash" }, KSP);
+    check("cash: a salesperson adds today's tea, paid from the drawer", sx.success && drawer().now === 1400 && drawer().expenses === 100, [sx.message, drawer()]);
+    kc("saveExpense", { title: "Courier", amount: 200, method: "upi" }, KMG);
+    check("...a UPI expense doesn't touch it", drawer().now === 1400);
+    kc("saveExpense", { title: "Yesterday's tea, typed late", amount: 50, method: "cash", date: yesterday }, KMG);
+    check("...nor one dated before the count (the count already saw that cash gone)", drawer().now === 1400, drawer());
+    const kOld = kc("saveExpense", { title: "Short-lived", amount: 30, method: "cash" }, KMG).data.id;
+    check("...a manager's cash expense today does", drawer().now === 1370);
+    kc("deleteExpense", { id: kOld }, KMG);
+    check("...and deleting it gives it back", drawer().now === 1400, drawer());
+    const exList = book(1).branches[0].expense_list;
+    check("cash: the book lists the cash expenses since the count, with who added them", exList.length === 1 && exList[0].title === "Tea" && exList[0].user_name === "Cash Sp" && exList[0].amount === 100, exList);
+    check("...not Home's card", kc("cashNow", {}).data.expense_list === undefined);
+
+    // Home and the day close
+    const spHome = kc("cashNow", {}, KSP).data;
+    check("cash: a salesperson's Home has the one number", spHome && spHome.now === 1400 && spHome.since_at === undefined && Object.keys(spHome).length === 2, spHome);
+    const owHome = kc("cashNow", {}).data;
+    check("cash: the owner's Home has it and since when", owHome.now === 1400 && owHome.since_at === c1.data.entries[0].at, owHome);
+    check("cash: a manager's too", kc("cashNow", {}, KMG).data.now === 1400);
+    const dc = kc("report", { type: "day_close" }).data;
+    check("cash: the day close has the drawer beside today's cash", dc.drawer.now === 1400 && dc.drawer.started, dc.drawer);
+    check("...not on a salesperson's own day close", kc("report", { type: "day_close" }, KSP).data.drawer === null);
+    check("...nor on another day's", kc("report", { type: "day_close", date: yesterday }).data.drawer === null);
+    const dcMail = kEnv.ctx.dayCloseMail_(dc, {}, { salesperson: "", footer: "" });
+    check("cash: the day-close email says what is in the drawer now", /In the drawer now \(expected\): ₹1,400/.test(dcMail.text) && />In the drawer now</.test(dcMail.html) && /Today's cash/.test(dcMail.html), dcMail.text);
+
+    // the owner's example: ₹2,400 in the drawer, ₹2,000 taken, ₹400 stays
+    kSell(K1000, "cash");
+    check("cash: ₹2,400 expected", drawer().now === 2400, drawer());
+    const profitBefore = kc("report", { type: "profit" }).data;
+    const homeBefore = kc("dashboard", {}).data;
+    check("cash: can't take more than was counted", /can't take more than the ₹2,400/.test(entry({ type: "take", counted: 2400, amount: 2500 }).message));
+    check("cash: taking needs an amount", /Enter the cash you are taking/.test(entry({ type: "take", counted: 2400, amount: 0 }).message));
+    const tk = entry({ type: "take", counted: 2400, amount: 2000, handed_by: "Cash Sp" });
+    check("cash: take ₹2,000 of ₹2,400", tk.success && /₹2,000 taken\. ₹400 stays at the kiosk/.test(tk.message) && !/short|extra/.test(tk.message), tk.message);
+    check("...₹400 left in the drawer", drawer().now === 400 && drawer().left === 400 && drawer().cash_in === 0, drawer());
+    const tkE = tk.data.entries[0];
+    check("...the entry keeps it all", tkE.type === "take" && tkE.expected === 2400 && tkE.counted === 2400 && tkE.amount === 2000 && tkE.balance === 400 && tkE.handed_by === "Cash Sp" && tkE.latest && !tkE.first, tkE);
+    check("...profit doesn't move (taking cash is not an expense)", sameData(kc("report", { type: "profit" }).data, profitBefore));
+    check("...nor do this month's expenses and profit on Home", kc("dashboard", {}).data.month_expenses === homeBefore.month_expenses && kc("dashboard", {}).data.month_profit === homeBefore.month_profit, [homeBefore.month_expenses, kc("dashboard", {}).data.month_expenses]);
+    kSell(K1000, "cash");
+    check("cash: the next sale adds to the ₹400", drawer().now === 1400, drawer());
+
+    // short and extra
+    const sh = entry({ type: "take", counted: 1350, amount: 1000 });
+    check("cash: ₹50 short is said and kept", sh.success && /₹350 stays/.test(sh.message) && /₹50 short/.test(sh.message) && sh.data.entries[0].difference === -50, sh.message);
+    check("...and the drawer starts again from what was really there", drawer().now === 350);
+    const ex = entry({ type: "count", counted: 370 });
+    check("cash: a count with ₹20 extra", ex.success && /₹20 extra/.test(ex.message) && ex.data.entries[0].difference === 20 && ex.data.entries[0].amount === 0 && drawer().now === 370, ex.message);
+
+    // a void after a count takes the cash back out; an even exchange moves none
+    const sv = kSell(K1000, "cash");
+    entry({ type: "count", counted: 1370 });
+    kc("voidSale", { id: sv.data.sale.id, reason: "Rang up twice" }, KMG);
+    check("cash: a void after the count hands its cash back", drawer().now === 370 && drawer().cash_out === 1000, drawer());
+    const sxb = kc("completeSale", { client_ref: "ck-x", lines: [{ variant_id: K1000, qty: 1 }], payments: [{ method: "cash", amount: 1000 }], customer: { phone: "9876500011", name: "Cash Swap" } }, KSP, 1).data;
+    const sw = kc("exchange", { client_ref: "ck-xx", sale_id: sxb.sale.id, items: [{ sale_item_id: sxb.items[0].id, qty: 1, restock: true }], reason: "Wrong size", lines: [{ variant_id: K500, qty: 2 }], payments: [], refund_method: "cash" }, KSP, 1);
+    check("cash: an even exchange moves no cash", sw.success && drawer().now === 1370, [sw.message, drawer()]);
+
+    // cash put in
+    check("cash: putting in needs an amount", /Enter the cash you are putting in/.test(entry({ type: "add", amount: 0 }).message));
+    const ad = entry({ type: "add", amount: 200, notes: "Change for the weekend" });
+    check("cash: ₹200 put in", ad.success && /₹200 put in\. ₹1,570 in the drawer/.test(ad.message) && drawer().now === 1570 && ad.data.entries[0].difference === 0, ad.message);
+
+    // the other branch keeps its own drawer
+    check("cash: the second branch hasn't started", drawer(KB2).started === false);
+    entry({ type: "count", counted: 300 }, KB2);
+    kc("adjustStock", { variant_id: K1000, mode: "set", qty: 5 }, KT, KB2);
+    check("cash: a sale at the second branch", kSell(K1000, "cash", KSP2, KB2).success);
+    check("cash: a sale at the second branch goes in its drawer", drawer(KB2).now === 1300 && drawer(1).now === 1570, [drawer(KB2), drawer(1)]);
+    const allHome = kc("cashNow", {}, KT, 0).data;
+    const line = (b) => allHome.branches.find((x) => x.branch_id === b);
+    check("cash: All branches shows a line per branch", allHome.now === undefined && line(1).now === 1570 && line(KB2).now === 1300 && line(KB2).name === "Cash Two" && line(1).started, allHome.branches);
+    const allBook = book(0);
+    check("cash: the All-branches book lists both", allBook.branches.length === 2 && allBook.entries.some((e) => e.branch_id === KB2) && allBook.can_edit, allBook.branches);
+    check("cash: a manager sees the book but can't change it", kc("cashBook", {}, KMG).data.can_edit === false && kc("cashBook", {}, KMG).data.branches[0].now === 1570);
+
+    // undo: only the latest of a branch
+    const latest1 = book(1).entries[0];
+    const older1 = book(1).entries[1];
+    check("cash: an older entry can't be undone", /Only the latest/.test(kc("undoCash", { id: older1.id, at: older1.at }).message));
+    const un = kc("undoCash", { id: latest1.id, at: latest1.at });
+    check("cash: undo the ₹200 put in", un.success && drawer().now === 1370 && un.data.entries[0].id === older1.id && un.data.entries[0].latest, un.message);
+    check("...gone means gone", /already gone/.test(kc("undoCash", { id: latest1.id, at: latest1.at }).message));
+    const re = entry({ type: "add", amount: 50 }).data.entries[0];
+    check("...an undo naming another moment leaves the entry alone (an undone id can be handed out again)",
+        /already gone/.test(kc("undoCash", { id: re.id, at: "2000-01-01 00:00:00" }).message) && drawer().now === 1420, drawer());
+
+    // a lost reply: the retry is answered from the first, and nothing is written twice
+    kEnv.ctx.resetReqCache_();
+    const nBefore = kEnv.ctx.rows_("Cash_Book").length;
+    const r1 = entry({ type: "count", counted: 1420 }, 1, "cash-retry-0001");
+    const r2 = entry({ type: "count", counted: 1420 }, 1, "cash-retry-0001");
+    kEnv.ctx.resetReqCache_();
+    check("cash: a retried count is written once", r1.success && r2.success && kEnv.ctx.rows_("Cash_Book").length === nBefore + 1, kEnv.ctx.rows_("Cash_Book").length - nBefore);
+    kc("saveExpense", { title: "Snacks", amount: 40, method: "cash" }, KSP);
+    check("cash: an expense before a count lowers what is expected", drawer().now === 1380);
+    entry({ type: "count", counted: 1380 });
+    check("...and is not taken off again after it", drawer().now === 1380 && drawer().expenses === 0, drawer());
+
+    // a salesperson's expenses: cash, today, their own
+    check("cash: a salesperson can't add a UPI expense", /cash paid from the drawer only/.test(kc("saveExpense", { title: "x", amount: 10, method: "upi" }, KSP).message));
+    check("...nor yesterday's", /today's expenses only/.test(kc("saveExpense", { title: "x", amount: 10, method: "cash", date: yesterday }, KSP).message));
+    check("...nor change one", /Only a manager can change an expense/.test(kc("saveExpense", { id: sx.data.id, title: "Tea", amount: 1, method: "cash" }, KSP).message));
+    check("...nor delete one", kc("deleteExpense", { id: sx.data.id }, KSP).code === "FORBIDDEN");
+    const spList = kc("listExpenses", { from: yesterday, to: today }, KSP).data;
+    check("...and sees only their own, today's", spList.expenses.length === 2 && spList.expenses.every((e) => e.date === today && e.user_name === "Cash Sp") && spList.total === 140, spList.expenses.map((e) => e.title));
+    check("...a manager still sees everyone's", kc("listExpenses", { from: yesterday, to: today }, KMG).data.expenses.length === 4);
+    check("...a stock mover can't add one", kc("saveExpense", { title: "x", amount: 10, method: "cash" }, KMV).code === "FORBIDDEN");
+
+    // cash from the owner's pocket: "Paid from the kiosk drawer" unticked
+    const listed = (id) => kc("listExpenses", { from: yesterday, to: today }).data.expenses.find((e) => e.id === id);
+    const dcExp = () => kc("report", { type: "day_close" }).data.cash_expenses;
+    const profitExp = () => kc("report", { type: "profit", from: today, to: today }).data.expenses;
+    const d0 = drawer().now;
+    const dc0 = dcExp();
+    const pe0 = profitExp();
+    const rent = kc("saveExpense", { title: "Rent", category: "Rent", amount: 5000, method: "cash", from_drawer: false });
+    check("cash: rent paid in cash from the owner's pocket leaves the drawer alone", rent.success && drawer().now === d0, [d0, drawer()]);
+    check("...is listed as not from the drawer", listed(rent.data.id).from_drawer === false);
+    check("...stays out of the day close's cash", dcExp() === dc0, [dc0, dcExp()]);
+    check("...but is an expense all the same (profit)", profitExp() === pe0 + 5000, [pe0, profitExp()]);
+    const oldApp = kc("saveExpense", { title: "Tea, older app", amount: 20, method: "cash" }, KMG);
+    check("cash: an app from before the tick sends nothing: from the drawer, as before", drawer().now === d0 - 20 && listed(oldApp.data.id).from_drawer === true && dcExp() === dc0 + 20);
+    const water = kc("saveExpense", { title: "Water", amount: 10, method: "cash", from_drawer: false }, KSP);
+    check("cash: a salesperson's is always the drawer's, whatever is sent", water.success && drawer().now === d0 - 30 && listed(water.data.id).from_drawer === true, drawer());
+    kc("saveExpense", { id: oldApp.data.id, title: "Tea, older app", amount: 20, method: "cash", from_drawer: false }, KMG);
+    check("cash: unticking it later gives the drawer its cash back", drawer().now === d0 - 10 && listed(oldApp.data.id).from_drawer === false, drawer());
+    kc("saveExpense", { id: oldApp.data.id, title: "Tea, older app", amount: 25, method: "cash" }, KMG);
+    check("...an edit from an older app keeps it as it was", drawer().now === d0 - 10 && listed(oldApp.data.id).from_drawer === false && listed(oldApp.data.id).amount === 25);
+    kc("saveExpense", { id: rent.data.id, title: "Rent", category: "Rent", amount: 5000, method: "cash", from_drawer: true });
+    check("...ticking it takes it off the drawer", drawer().now === d0 - 5010, drawer());
+    kc("saveExpense", { id: rent.data.id, title: "Rent", category: "Rent", amount: 5000, method: "cash", from_drawer: false });
+    const upiE = kc("saveExpense", { title: "Online ad", amount: 300, method: "upi", from_drawer: true });
+    check("cash: UPI is never the drawer's", drawer().now === d0 - 10 && listed(upiE.data.id).from_drawer === false);
+    const expRep = kc("report", { type: "expenses", from: today, to: today }).data.rows;
+    check("cash: Reports → Expenses says which came from the drawer", expRep.some((r) => r.title === "Rent" && r.from_drawer === false) && expRep.some((r) => r.title === "Water" && r.from_drawer === true), expRep);
+
+    // cash refunds on bills from before the count: their bills are looked up one by one
+    const kRet = (s) => kc("returnItems", { sale_id: s.data.sale.id, items: [{ sale_item_id: s.data.items[0].id, qty: 1, restock: true }], refund_method: "cash", reason: "Old bill" }, KMG);
+    const so = kSell(K500, "cash");
+    entry({ type: "count", counted: drawer().now });
+    const atCount = drawer().now;
+    check("cash: a refund on a bill from before the count comes off", kRet(so).success && drawer().now === atCount - 500 && drawer().cash_out === 500, drawer());
+    kSell(K1000, "cash");
+    check("...with new sales since as well", drawer().now === atCount + 500 && drawer().cash_in === 1000, drawer());
+    // many of them (more than CASH_OLD_BILLS_): one read from the oldest instead
+    const many = [];
+    for (let i = 0; i < 17; i++) many.push(kSell(K500, "cash"));
+    entry({ type: "count", counted: drawer().now });
+    const atCount2 = drawer().now;
+    many.forEach(kRet);
+    check("cash: 17 refunds on older bills all come off", drawer().now === atCount2 - 17 * 500 && drawer().cash_out === 8500, drawer());
+    kc("adjustStock", { variant_id: K500, mode: "set", qty: 40 }, KT, 1);
+
+    // the tail read behind it: the same rows as reading the id column, also when a sheet is out of order
+    const kRun = (code) => require("vm").runInContext(`resetReqCache_(); ${code}`, kEnv.ctx);
+    const viaTail = (n, f) => JSON.stringify(kRun(`rowsFromId_("${n}", ${f}).map((r) => [r.id, r._r, r.amount || r.grand_total])`));
+    const viaCol = (n, f) => JSON.stringify(kRun(`windowRows_("${n}", "id", ${f}, null).map((r) => [r.id, r._r, r.amount || r.grand_total])`));
+    const kPayN = kRun(`rows_("Payments").length`);
+    const froms = [0, 1, 2, 5, kPayN - 1, kPayN, kPayN + 1, 99999];
+    check("rowsFromId_: the same rows as windowRows_ (Payments, Sales)", ["Payments", "Sales"].every((n) => froms.every((f) => viaTail(n, f) === viaCol(n, f))), froms.map((f) => [viaTail("Payments", f).length, viaCol("Payments", f).length]));
+    check("...and gives only the rows asked for", JSON.parse(viaTail("Payments", kPayN - 1)).length === 2);
+    const kPaySh = kEnv.ss.getSheetByName("Payments");
+    const kW = kRun(`cols_("Payments").length`);
+    const kLast = kPaySh.getLastRow();
+    const rowA = kPaySh.getRange(kLast, 1, 1, kW).getValues();
+    const rowB = kPaySh.getRange(kLast - 3, 1, 1, kW).getValues();
+    kPaySh.getRange(kLast, 1, 1, kW).setValues(rowB); // a sheet sorted by hand: two rows swapped
+    kPaySh.getRange(kLast - 3, 1, 1, kW).setValues(rowA);
+    check("...a sheet out of order is read the safe way", [kPayN - 2, kPayN - 4, kPayN, kPayN + 1, 1].every((f) => viaTail("Payments", f) === viaCol("Payments", f)),
+        [kPayN - 2, kPayN - 4, kPayN, kPayN + 1, 1].map((f) => [f, viaTail("Payments", f), viaCol("Payments", f)]));
+    kPaySh.getRange(kLast, 1, 1, kW).setValues(rowA);
+    kPaySh.getRange(kLast - 3, 1, 1, kW).setValues(rowB);
+    // ids no longer one row apart from their place (rows deleted by hand at the top): still the right rows
+    const idCol = kPaySh.getRange(2, 1, kLast - 1, 1);
+    const ids0 = idCol.getValues();
+    idCol.setValues(ids0.map((r) => [r[0] + 40]));
+    const offFroms = [1, 41, 45, kPayN + 38, kPayN + 40, kPayN + 41, kPayN + 60];
+    check("...ids offset from their rows are read the safe way", offFroms.every((f) => viaTail("Payments", f) === viaCol("Payments", f)), offFroms.map((f) => [f, viaTail("Payments", f), viaCol("Payments", f)]));
+    idCol.setValues(ids0);
+    check("...and back in order, the same again", froms.every((f) => viaTail("Payments", f) === viaCol("Payments", f)));
+
+    // a Sheet from before this version: asks for Setup; Setup adds the tab
+    const kTab = kEnv.ss.getSheetByName("Cash_Book");
+    kEnv.ss.deleteSheet(kTab);
+    const stale = kc("cashNow", {});
+    check("cash: a Sheet without the tab asks for Setup", !stale.success && /Cash_Book' missing\. Run Setup/.test(stale.message), stale.message);
+    check("...while Home's own figures still load", kc("dashboard", {}).success);
+    kEnv.ctx.setupSheets();
+    check("...Setup adds it back, empty: not started", kc("cashNow", {}).data.started === false);
+    // and a Sheet without Expenses.not_drawer: asks for Setup; Setup adds the column, every expense the drawer's
+    const eKeys = kRun(`cols_("Expenses")`);
+    check("not_drawer is the last Expenses column (Setup adds columns only at the end)", eKeys[eKeys.length - 1] === "not_drawer");
+    const eSh = kEnv.ss.getSheetByName("Expenses");
+    const eCol = eSh.getRange(1, eKeys.length, eSh.getLastRow(), 1);
+    eCol.setValues(eCol.getValues().map(() => [""]));
+    const eStale = kc("listExpenses", {});
+    check("...a Sheet without it asks for Setup", !eStale.success && eStale.code === "SETUP", eStale);
+    kEnv.ctx.setupSheets();
+    check("...Setup adds it, and older expenses read as from the drawer", kc("listExpenses", { from: today, to: today }).data.expenses.filter((e) => e.method === "cash").every((e) => e.from_drawer === true));
+
+    // Reset test data clears it
+    entry({ type: "count", counted: 10 });
+    const kReset = kEnv.ctx.resetTestData_();
+    kEnv.ctx.resetReqCache_();
+    check("cash: Reset test data clears the cash book", kEnv.ctx.rows_("Cash_Book").length === 0, kReset);
+}
+
 console.log(`\n${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

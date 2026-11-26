@@ -54,7 +54,9 @@ class FrozenDate extends HostDate {
 ctx.Date = FrozenDate;
 
 // ---- count Sheets calls, cells read, and cells read inside the lock ----
-let on = false, calls = 0, cells = 0, lockCells = 0, inLock = 0;
+// rows: the rows each read spans, added up — on real Google a read costs by its rows (~0.27 ms a row,
+// measured 2026-09-27), far more than by its cells
+let on = false, calls = 0, cells = 0, rowsRead = 0, lockCells = 0, inLock = 0;
 const s0 = (() => { ctx.setupSheets(); return ss.getSheetByName("Sales"); })();
 env.alerts.length = 0;
 const RangeP = Object.getPrototypeOf(s0.getRange(1, 1));
@@ -68,6 +70,7 @@ for (const P of [Object.getPrototypeOf(s0), RangeP, Object.getPrototypeOf(ss)])
                 if (m === "getValues" || m === "getValue") {
                     const n = m === "getValue" ? 1 : this.nr * this.nc;
                     cells += n;
+                    rowsRead += m === "getValue" ? 1 : this.nr;
                     if (inLock) lockCells += n;
                 }
             }
@@ -145,12 +148,12 @@ const MASK = /^(token|req_id)$/;
 const clean = (v) => JSON.parse(JSON.stringify(v, (k, x) => (MASK.test(k) ? "…" : x)));
 const measured = [];
 function measure(step, fn) {
-    calls = cells = lockCells = 0;
+    calls = cells = rowsRead = lockCells = 0;
     on = true;
     const t = HostDate.now();
     let r;
     try { r = fn(); } finally { on = false; }
-    measured.push({ step, calls, cells, lockCells, ms: HostDate.now() - t });
+    measured.push({ step, calls, cells, rows: rowsRead, lockCells, ms: HostDate.now() - t });
     return r;
 }
 const rid = (() => { let n = 0; return () => "scale-req-" + ++n; })();
@@ -230,9 +233,35 @@ api("bootstrap full", "bootstrap", {}, T, B1, (d) => d && { user: d.user, branch
 api("report performance month", "report", { type: "performance", from: "2026-09-01", to: "2026-09-27" }, T, B1);
 api("report performance 12 months, first", "report", { type: "performance", from: "2025-10-01", to: "2026-09-27" }, T, B1);
 api("report performance 12 months, again", "report", { type: "performance", from: "2025-10-01", to: "2026-09-27" }, T, B1);
+// a salesperson's Home, the screen opened most at the counter (on every backend, so it compares)
+api("dashboard b1, salesperson", "dashboard", {}, S, B1);
+// Cash at the kiosk, once the owner has counted a drawer (after everything else, and only on a backend that
+// has it, so the steps above still compare one for one with an older one)
+if (run(`typeof apiCashEntry_`) === "function") {
+    api("cashEntry count b1", "cashEntry", { type: "count", counted: 5000 }, T, B1);
+    call("completeSale", { client_ref: "g4", lines: [{ variant_id: vB, qty: 1 }], payments: [{ method: "cash", amount: 100000 }] }, T, B1);
+    call("saveExpense", { title: "Tea", amount: 40, method: "cash" }, S, B1);
+    api("dashboard b1, drawer counted", "dashboard", {}, T, B1); // Home's own figures: no cash read in them
+    api("cashNow b1, drawer counted", "cashNow", {}, T, B1); // Home's cash card, asked for alongside
+    api("cashNow b1, drawer counted, salesperson", "cashNow", {}, S, B1);
+    api("cashNow all branches", "cashNow", {}, T, 0);
+    api("report day_close, drawer counted", "report", { type: "day_close" }, T, B1);
+    api("cashBook b1", "cashBook", {}, T, B1);
+    api("cashEntry take b1", "cashEntry", { type: "take", counted: 5000, amount: 4000 }, T, B1);
+    // the longer since the owner's last count, the more payments (and their bills) the cash card reads: at
+    // this shop's size (~82 bills a day over both branches) a week is ~570 Payments rows, a month ~2,500
+    const lastPay = run(`resetReqCache_(); nextId_("Payments") - 1`);
+    for (const [label, n] of [["a week", 570], ["a month", 2500], ["three months", 7500]]) {
+        run(`(function(){ resetReqCache_(); appendRows_("Cash_Book", [{ id: nextId_("Cash_Book"), at: nowStr_(), branch_id: 1, type: "count",
+            expected: 1000, counted: 1000, difference: 0, amount: 0, balance: 1000, handed_by: "", notes: "scale", pay_id: ${lastPay - n}, exp_id: 0, user_id: 1, user_name: "Owner" }]); })()`);
+        api("cashNow b1, last count " + label + " ago", "cashNow", {}, T, B1);
+        api("day_close, last count " + label + " ago", "report", { type: "day_close" }, T, B1);
+    }
+}
 
 // ---- report ----
-console.log("\nstep".padEnd(40), "calls".padStart(6), "cells read".padStart(12), "in lock".padStart(10), "js ms".padStart(7));
-for (const m of measured) console.log(m.step.padEnd(40), String(m.calls).padStart(6), String(m.cells).padStart(12), String(m.lockCells).padStart(10), String(m.ms).padStart(7));
+console.log("\nstep".padEnd(46), "calls".padStart(6), "cells read".padStart(12), "rows read".padStart(10), "in lock".padStart(10), "js ms".padStart(7));
+for (const m of measured)
+    console.log(m.step.padEnd(45), String(m.calls).padStart(6), String(m.cells).padStart(12), String(m.rows).padStart(10), String(m.lockCells).padStart(10), String(m.ms).padStart(7));
 const out = opt("--out");
 if (out) { fs.writeFileSync(out, JSON.stringify(replies)); console.log("\nreplies saved to", out); }

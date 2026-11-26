@@ -240,6 +240,9 @@ const SCHEMA = {
         user_id: "n",
         created_at: "d",
         branch_id: "n",
+        // 1 = cash paid from elsewhere (the owner's pocket: rent, salary), not the kiosk drawer, so the drawer
+        // (cash.gs) and the day close leave it out. Blank/0 = from the drawer: every older expense, as before.
+        not_drawer: "n",
     },
     Activity_Logs: {
         id: "n",
@@ -293,6 +296,25 @@ const SCHEMA = {
         checked_by: "n",
         checked_at: "d",
         created_by: "n",
+    },
+    // the owner's visits to a branch's cash drawer (cash.gs): each one a count, cash taken, or cash put in.
+    // The cash expected in the drawer now = the latest entry's balance + the cash that moved since it.
+    Cash_Book: {
+        id: "n",
+        at: "d",
+        branch_id: "n",
+        type: "s", // count | take | add
+        expected: "n", // what the app expected in the drawer just before (the first count: what was counted)
+        counted: "n", // what the owner counted (count, take)
+        difference: "n", // counted − expected: below 0 short, above 0 extra
+        amount: "n", // taken (take) or put in (add)
+        balance: "n", // left in the drawer after this entry
+        handed_by: "s", // who handed the cash over
+        notes: "s",
+        pay_id: "n", // the last Payments row before this entry: cash after it is counted from here on
+        exp_id: "n", // the last Expenses row before this entry (with `at`, for expenses entered in the same second)
+        user_id: "n",
+        user_name: "s",
     },
 };
 

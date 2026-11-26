@@ -18,8 +18,10 @@ function lastMonth() {
 }
 
 export default function Expenses() {
-  const { toast, isAllBranches, multiBranch } = useApp();
-  const [preset, setPreset] = useState("month");
+  const { toast, isAllBranches, multiBranch, isManager } = useApp();
+  // a salesperson adds cash paid from the drawer today and sees their own; the server holds them to it
+  const own = !isManager;
+  const [preset, setPreset] = useState(own ? "today" : "month");
   const [edit, setEdit] = useState(null);
   const [from, to] = preset === "month" ? [monthStart(), istDate()] : preset === "last" ? lastMonth() : [istDate(), istDate()];
 
@@ -34,18 +36,22 @@ export default function Expenses() {
     <>
       <TopBar title="Expenses" back="more" right={loading && data ? <Updating /> : null} />
       <div className="page">
-        <Chips
-          value={preset}
-          onChange={setPreset}
-          options={[
-            { value: "today", label: "Today" },
-            { value: "month", label: "This month" },
-            { value: "last", label: "Last month" },
-          ]}
-        />
+        {own ? (
+          <div className="small muted">Cash you paid from the drawer today, like tea or a courier. To change or delete one, ask a manager.</div>
+        ) : (
+          <Chips
+            value={preset}
+            onChange={setPreset}
+            options={[
+              { value: "today", label: "Today" },
+              { value: "month", label: "This month" },
+              { value: "last", label: "Last month" },
+            ]}
+          />
+        )}
         {data && (
           <div className="stat brown mt">
-            <div className="label">Total spent</div>
+            <div className="label">{own ? "Paid from the drawer today" : "Total spent"}</div>
             <div className="value">{inr(data.total)}</div>
           </div>
         )}
@@ -54,21 +60,34 @@ export default function Expenses() {
             <SkeletonList />
           </div>
         ) : data.expenses.length === 0 ? (
-          <Empty icon={Wallet} title="No expenses" text="Add shop expenses like rent, salary, tea or packaging." />
+          <Empty icon={Wallet} title="No expenses" text={own ? "Add cash you paid from the drawer today, like tea or a courier." : "Add shop expenses like rent, salary, tea or packaging."} />
         ) : (
           <div className="list mt">
-            {data.expenses.map((e) => (
-              <button key={e.id} className="list-item" onClick={() => setEdit(e)}>
-                <div className="grow">
-                  <div className="title">{e.title}</div>
-                  <div className="sub">
-                    {relDay(e.date)} · {e.category} · {METHOD_LABEL[e.method]} · {e.user_name}
-                    {multiBranch && isAllBranches ? " · " + e.branch_name : ""}
+            {data.expenses.map((e) => {
+              const body = (
+                <>
+                  <div className="grow">
+                    <div className="title">{e.title}</div>
+                    <div className="sub">
+                      {relDay(e.date)} · {e.category} · {METHOD_LABEL[e.method]}
+                      {e.method === "cash" && e.from_drawer === false ? " (not from the drawer)" : ""} · {e.user_name}
+                      {multiBranch && isAllBranches ? " · " + e.branch_name : ""}
+                    </div>
                   </div>
+                  <b className="money">{inr(e.amount)}</b>
+                </>
+              );
+              // a salesperson can't change one once saved, so their rows open nothing
+              return own ? (
+                <div key={e.id} className="list-item" style={{ cursor: "default" }}>
+                  {body}
                 </div>
-                <b className="money">{inr(e.amount)}</b>
-              </button>
-            ))}
+              ) : (
+                <button key={e.id} className="list-item" onClick={() => setEdit(e)}>
+                  {body}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -90,7 +109,7 @@ export default function Expenses() {
 }
 
 function ExpenseSheet({ e, onClose, onSaved }) {
-  const { settings, toast } = useApp();
+  const { settings, toast, isManager } = useApp();
   const [f, setF] = useState(e || {});
   const [busy, setBusy] = useState(false);
   const [confirm, confirmNode] = useConfirm();
@@ -100,7 +119,11 @@ function ExpenseSheet({ e, onClose, onSaved }) {
   const save = async () => {
     setBusy(true);
     try {
-      const r = await runBusy("Saving expense…", () => api("saveExpense", { ...f, category: f.category || cats[cats.length - 1] }));
+      const body = { ...f, category: f.category || cats[cats.length - 1], from_drawer: f.from_drawer !== false };
+      // a salesperson's is always today's: no date is sent, so the server's today is used — a sheet opened
+      // just before midnight and saved after it is still accepted
+      if (!isManager) delete body.date;
+      const r = await runBusy("Saving expense…", () => api("saveExpense", body));
       toast(r.message, "success");
       onSaved();
     } catch (ex) {
@@ -149,15 +172,36 @@ function ExpenseSheet({ e, onClose, onSaved }) {
       <Field label="What for?">
         <input className="input" value={f.title || ""} onChange={(ev) => setF({ ...f, title: ev.target.value })} placeholder="e.g. Electricity bill" />
       </Field>
-      <div className="grid-2">
-        <Field label="Date">
-          <DateField max={istDate()} value={f.date || istDate()} onChange={(ev) => setF({ ...f, date: ev.target.value })} aria-label="Date" />
-        </Field>
-        <div className="field">
-          <label>Paid by</label>
-          <Seg value={f.method || "cash"} onChange={(m) => setF({ ...f, method: m })} options={["cash", "upi", "card"].map((m) => ({ value: m, label: METHOD_LABEL[m] }))} />
+      {isManager ? (
+        <div className="grid-2">
+          <Field label="Date">
+            <DateField max={istDate()} value={f.date || istDate()} onChange={(ev) => setF({ ...f, date: ev.target.value })} aria-label="Date" />
+          </Field>
+          <div className="field">
+            <label>Paid by</label>
+            <Seg
+              value={f.method || "cash"}
+              // switching a UPI or card expense to cash starts it as the drawer's, like a new one
+              onChange={(m) => setF({ ...f, method: m, from_drawer: m === "cash" && (f.method || "cash") !== "cash" ? true : f.from_drawer })}
+              options={["cash", "upi", "card"].map((m) => ({ value: m, label: METHOD_LABEL[m] }))}
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="small muted mb">Paid in cash from the drawer, today. Check it before saving: only a manager can change it after.</div>
+      )}
+      {/* cash from the owner's pocket (rent, salary) must not come off the drawer's expected cash (Cash at kiosk) */}
+      {isManager && (f.method || "cash") === "cash" && (
+        <div className="field">
+          <label className="kv" style={{ alignItems: "center", cursor: "pointer", padding: 0 }}>
+            <span className="row gap-s">
+              <input type="checkbox" checked={f.from_drawer !== false} onChange={(ev) => setF({ ...f, from_drawer: ev.target.checked })} style={{ width: 20, height: 20, accentColor: "var(--brown)" }} />
+              <span>Paid from the kiosk drawer</span>
+            </span>
+          </label>
+          <div className="hint">Untick for cash from your own pocket, like rent or salary. It then stays out of the cash expected in the drawer.</div>
+        </div>
+      )}
       <Field label="Note (optional)">
         <input className="input" value={f.notes || ""} onChange={(ev) => setF({ ...f, notes: ev.target.value })} />
       </Field>

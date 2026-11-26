@@ -98,6 +98,9 @@ function dayCloseMail_(d, s, opt) {
             "</td><td " + tdr + ">" + qtyTxt(it.qty, it.unit) + "</td><td " + tdr + ">" + qtyTxt(it.stock_left, it.unit) +
             (it.refill ? '<div style="font-size:11px;font-weight:700;color:#C62828">' + refillTxt(it) + "</div>" : "") + "</td></tr>")
         .join("");
+    // the drawer counted on from the owner's last count (cash.gs), once a branch's drawer has been counted
+    const drawerOn = !!(d.drawer && d.drawer.started);
+    const sinceTxt = drawerOn ? dateNice_(d10_(d.drawer.since_at)) + ", " + String(d.drawer.since_at).slice(11, 16) : "";
     const extra = [];
     d.voided.forEach((v) => extra.push("Voided " + escHtml_(v.invoice_no) + " (" + escHtml_(v.salesman_name) + ") " + inrText_(v.amount)));
     d.credit_notes.forEach((c) => extra.push("Return " + escHtml_(c.credit_note_no) + " on " + escHtml_(c.invoice_no) + " −" + inrText_(c.total) + " · " + escHtml_(c.reason)));
@@ -117,10 +120,15 @@ function dayCloseMail_(d, s, opt) {
         ">Refund</th><th " + thr + ">Net</th></tr>" + methods + "</table>" +
         (opt.salesperson ? "" :
             '<table style="width:100%;border-collapse:collapse;font-size:14px;margin-top:8px">' +
-            (d.cash_expenses ? "<tr><td " + td + ">Cash expenses paid</td><td " + tdr + ">−" + inrText_(d.cash_expenses) + "</td></tr>" : "") +
-            '<tr><td style="padding:8px;font-weight:700;font-size:16px;border-top:2px solid #1A1A1A">Cash in drawer</td>' +
-            '<td style="padding:8px;font-weight:700;font-size:16px;text-align:right;border-top:2px solid #1A1A1A">' + inrText_(d.expected_cash) + "</td></tr></table>" +
-            '<div style="font-size:12px;color:#7A716A">Expected cash from today\'s sales (plus your opening float).</div>') +
+            (d.cash_expenses ? "<tr><td " + td + ">Paid from the drawer</td><td " + tdr + ">−" + inrText_(d.cash_expenses) + "</td></tr>" : "") +
+            (drawerOn
+                ? "<tr><td " + td + ">Today's cash</td><td " + tdr + ">" + inrText_(d.expected_cash) + "</td></tr>" +
+                  '<tr><td style="padding:8px;font-weight:700;font-size:16px;border-top:2px solid #1A1A1A">In the drawer now</td>' +
+                  '<td style="padding:8px;font-weight:700;font-size:16px;text-align:right;border-top:2px solid #1A1A1A">' + inrText_(d.drawer.now) + "</td></tr></table>" +
+                  '<div style="font-size:12px;color:#7A716A">Expected, counting on from the last count on ' + sinceTxt + ".</div>"
+                : '<tr><td style="padding:8px;font-weight:700;font-size:16px;border-top:2px solid #1A1A1A">Cash in drawer</td>' +
+                  '<td style="padding:8px;font-weight:700;font-size:16px;text-align:right;border-top:2px solid #1A1A1A">' + inrText_(d.expected_cash) + "</td></tr></table>" +
+                  '<div style="font-size:12px;color:#7A716A">Expected cash from today\'s sales (plus your opening float).</div>')) +
         ((d.by_branch || []).length
             ? '<h3 style="font-family:Georgia,serif;color:#654321;margin:18px 0 6px">By branch</h3><table style="width:100%;border-collapse:collapse;font-size:14px"><tr><th ' +
               th + ">Branch</th><th " + thr + ">Bills</th><th " + thr + ">Returns</th><th " + thr + ">Net</th></tr>" +
@@ -152,7 +160,9 @@ function dayCloseMail_(d, s, opt) {
         "Net sales: " + inrText_(d.net) + "   Bills: " + d.bills + "   Discounts: " + inrText_(d.discounts) + "   Returns: " + inrText_(d.returns),
         "",
         Object.keys(d.methods).map((m) => (METHOD_NAME_[m] || m) + ": " + inrText_(d.methods[m].net)).join("   "),
-        opt.salesperson ? "" : "Cash in drawer (expected): " + inrText_(d.expected_cash),
+        opt.salesperson ? ""
+            : drawerOn ? "Today's cash: " + inrText_(d.expected_cash) + "   In the drawer now (expected): " + inrText_(d.drawer.now) + " — since the count on " + sinceTxt
+                : "Cash in drawer (expected): " + inrText_(d.expected_cash),
         "",
         d.by_salesman
             .map((r) =>

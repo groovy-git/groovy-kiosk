@@ -222,6 +222,8 @@ function apiDashboard_(p, ctx) {
         data.month_reviews = reviews.length; // the list is this month's counted reviews
         data.month_samples = reviews.filter((v) => v.sample).length;
     }
+    // the cash in the drawer is not worked out here: Home asks for it separately (cashNow, cash.gs) at the
+    // same time, so these figures come back as quickly as they always have
     return { data };
 }
 
@@ -382,10 +384,17 @@ function reportDayClose_(p, ctx) {
     });
     const cashExpenses = own
         ? 0
-        : sumBy_(rows_("Expenses").filter((e) => e.date === date && e.method === "cash" && inBranch_(ctx, e.branch_id)), "amount");
+        : sumBy_(rows_("Expenses").filter((e) => e.date === date && fromDrawer_(e) && inBranch_(ctx, e.branch_id)), "amount"); // cash from the owner's pocket left out
     const voided = windowRows_("Sales", "date", date, date).filter(
         (s) => s.status === "voided" && (!own || s.salesman_id === own) && inBranch_(ctx, s.branch_id),
     );
+    // expected_cash is today's cash only; the drawer carries on from the owner's last count (cash.gs).
+    // Today at one branch, and not on a salesperson's own day close (they see the drawer on Home).
+    let drawer = null;
+    if (!own && ctx.branch_id && date === todayStr_()) {
+        const c = cashNow_([ctx.branch_id])[ctx.branch_id];
+        drawer = c.started ? { started: true, now: c.now, since_at: c.since_at } : { started: false };
+    }
     return {
         date,
         bills: daySales.length,
@@ -396,6 +405,7 @@ function reportDayClose_(p, ctx) {
         methods,
         cash_expenses: cashExpenses,
         expected_cash: r2_((methods.cash ? methods.cash.net : 0) - cashExpenses),
+        drawer,
         by_salesman: leaderboard_(sales, returns, date, date, reviewsIn_(ctx, date, date)),
         voided: voided.map((s) => ({ invoice_no: s.invoice_no, amount: s.grand_total, salesman_name: s.salesman_name, notes: s.notes })),
         credit_notes: dayRets.map((r) => ({ credit_note_no: r.credit_note_no, invoice_no: r.invoice_no, total: r.total, method: r.refund_method, reason: r.reason })),
@@ -872,7 +882,7 @@ function reportExpenses_(p, ctx) {
     return {
         from, to,
         by_category: Object.keys(byCat).map((k) => ({ category: k, amount: byCat[k] })).sort((a, b) => b.amount - a.amount),
-        rows: rows.map((e) => ({ date: e.date, category: e.category, title: e.title, amount: e.amount, method: e.method })),
+        rows: rows.map((e) => ({ date: e.date, category: e.category, title: e.title, amount: e.amount, method: e.method, from_drawer: fromDrawer_(e) })),
         total: sumBy_(rows, "amount"),
     };
 }
