@@ -3,8 +3,8 @@ import { Plus, X, UserCheck, Building2 } from "lucide-react";
 import { useApp } from "../../store";
 import { api } from "../../lib/api";
 import { runBusy } from "../../lib/busy";
-import { newClientRef, offerAllowance, offerDiscount, offerFill, offersOf } from "../../lib/cart";
-import { inr, r2, METHOD_LABEL, isMaskedPhone } from "../../lib/format";
+import { liveOffers, newClientRef, offerAllowance, offerDiscount, offerFill, offerLive, offersOf } from "../../lib/cart";
+import { inr, r2, METHOD_LABEL, isMaskedPhone, istDate, fmtDate } from "../../lib/format";
 import { Button, Chips, Field, MoneyInput, Seg, Sheet, Spinner } from "../../components/ui";
 
 const METHODS = ["upi", "cash", "card"]; // UPI first: most customers pay that way
@@ -36,8 +36,10 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   // a branch without GST bills with none — no choice to offer (the server records such bills at 0% GST)
   const branchNoGst = !!(branch && branch.gst_off);
 
-  // the owner's offers that are switched on (Settings → Billing → Offers); one can be picked for this bill
-  const offers = useMemo(() => offersOf(settings).filter((o) => o.active !== false), [settings]);
+  // the owner's offers that can be given today: switched on, and today inside their dates, if they have any
+  // (Settings → Billing → Offers); one can be picked for this bill
+  const today = istDate();
+  const offers = useMemo(() => liveOffers(settings, today), [settings, today]);
   const offer = offers.find((o) => o.id === cart.offer_id) || null;
   const offerLines = useMemo(
     () =>
@@ -57,14 +59,25 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   useEffect(() => {
     if (!open) return;
     setPays([{ method: "upi", amount: String(due), reference: "", auto: true }]);
-    // an offer still on its own amount is worked out again (the bill may have changed since); an offer
-    // the owner has since switched off leaves the bill, and its amount stays as a plain discount
+    // an offer still on its own amount is worked out again (the bill may have changed since). One that
+    // can't be given today any more — ended, not started, switched off or deleted since it was picked (a
+    // held bill finished the next day) — leaves the bill, and so does the discount it filled in; a
+    // discount typed by hand stays
+    const gone = !!cart.offer_id && !offer;
     if (offer && cart.offer_auto) fillOffer(offer);
-    else {
+    else if (gone && cart.offer_auto) {
+      setDiscMode("pct");
+      applyDisc("", "pct");
+    } else {
       setDiscText(cart.bill_disc ? String(cart.bill_disc) : "");
       setDiscMode(cart.bill_disc ? "rs" : "pct");
     }
-    if (cart.offer_id && !offer) setCart((c) => ({ ...c, offer_id: null, offer_auto: false }));
+    if (gone) {
+      const o = offersOf(settings).find((x) => x.id === cart.offer_id);
+      const why = !o ? "is no longer available" : { ended: `ended on ${fmtDate(o.to)}`, soon: `starts on ${fmtDate(o.from)}`, off: "is switched off" }[offerLive(o, today)] || "is no longer available";
+      toast(`${o ? o.name : "The offer on this bill"} ${why}, so it has been taken off this bill.${cart.offer_auto ? "" : " The discount you typed stays."}`, "error", 6000);
+      setCart((c) => ({ ...c, offer_id: null, offer_auto: false }));
+    }
     setShowGstin(!!cust.gstin);
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -323,6 +336,11 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
             {piecesShort > 0 && (
               <div className="hint">
                 Add {piecesShort} more {piecesShort === 1 ? "item" : "items"} for {offer.name}
+              </div>
+            )}
+            {offer && offer.to && (
+              <div className="hint">
+                {offer.name} runs till {fmtDate(offer.to)}
               </div>
             )}
           </div>

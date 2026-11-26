@@ -139,6 +139,8 @@ The app prints an **80 mm receipt** or an **A4 tax invoice** using the phone's o
 1. Log in as the owner, then open **More → Settings**:
     - **Shop** tab: enter the GSTIN, address and bill footer.
     - **Billing** tab: check the **salesperson discount limit**, the **most a salesperson may refund on one bill** (₹2,000 to begin with; 0 means only managers can accept returns), the **return window** and **1 tola = 12 ml**. Under **Offers**, set up the offers staff can pick at checkout: **% off** (10% off, 20% off) or **Buy X, pay for Y** (buy 3, pay for 2: for every 3 packed items the cheapest is free; loose attar doesn't count). Switch an offer off, change it or delete it at any time; bills already made keep the offer's name. Tap **Save settings** after changing offers.
+        - **Dates (optional):** give a seasonal offer a **From** and **To** date (for example Christmas, 20 Dec to 28 Dec): staff see it only on those days, both included, while it is On. On 29 Dec it is gone from checkout even if you leave it On. Leave the dates empty for an offer that runs every day until you switch it Off (like your standard 10% off). The list shows **Starts 20 Dec**, **On now** or **Ended** beside dated offers.
+        - **A bill held with an offer** that has since ended (or been switched off) loses the offer and the discount it filled in when it is checked out, with a message; a discount typed by hand stays.
     - **Categories** tab: confirm the HSN codes and GST rates with your accountant.
     - You can add your own categories (e.g. _Bakhoor_) and hide ones you don't sell. A category can be deleted only if no product uses it.
 2. Go to **More → Staff** and add managers and salespeople, each with their own email and password.

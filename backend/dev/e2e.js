@@ -2791,6 +2791,56 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     const pdf = oEnv.ctx.invoicePdfHtml_(oEnv.ctx.saleDetail_(oEnv.ctx.findById_("Sales", s20.data.sale.id), null));
     check("the invoice PDF names the offer beside the discount", pdf.indexOf("Discount · 20% off") >= 0);
 
+    // offer dates: an offer runs only between its From and To, both days included, by the server's date
+    const oToday = oEnv.ctx.todayStr_();
+    const oDay = (n) => oEnv.ctx.daysAgoStr_(-n); // n days from today, before it when negative
+    const dated = [
+        { id: "xmas", name: "Christmas", type: "buy", buy: 3, pay: 2, active: true, from: oDay(-10), to: oDay(-1) }, // ended yesterday
+        { id: "newyear", name: "New Year 20%", type: "pct", pct: 20, active: true, from: oDay(1), to: oDay(5) }, // starts tomorrow
+        { id: "week", name: "This week 20%", type: "pct", pct: 20, active: true, from: oDay(-2), to: oDay(2) },
+        { id: "firstday", name: "First day 20%", type: "pct", pct: 20, active: true, from: oToday, to: oDay(3) },
+        { id: "lastday", name: "Last day 20%", type: "pct", pct: 20, active: true, from: oDay(-3), to: oToday },
+        { id: "fromonly", name: "From only 20%", type: "pct", pct: 20, active: true, from: oDay(-3) },
+        { id: "toonly", name: "To only 20%", type: "pct", pct: 20, active: true, to: oDay(3) },
+    ];
+    check("offer dates: a date that isn't real is refused", /Christmas: the To date is not a real date/.test(save(JSON.stringify([Object.assign({}, dated[0], { to: "2026-02-30" })])).message));
+    check("...nor one written another way", /not a real date/.test(save(JSON.stringify([Object.assign({}, dated[0], { from: "20-12-2026" })])).message));
+    check("...From after To is refused", /New Year 20%: the From date is after the To date/.test(save(JSON.stringify([Object.assign({}, dated[1], { from: oDay(6) })])).message));
+    check("offer dates: the owner saves dated offers", save(JSON.stringify(after.concat(dated))).success);
+    const withDates = offersNow(OS);
+    const got = (id) => withDates.find((o) => o.id === id);
+    check("...kept as given; offers without dates carry none", got("xmas").from === oDay(-10) && got("xmas").to === oDay(-1) && got("fromonly").to === undefined && got("toonly").from === undefined &&
+        withDates.slice(0, 4).every((o) => o.from === undefined && o.to === undefined), withDates);
+    const with20 = (id) => sale(OS, three, { bill_disc: 460, offer_id: id });
+    check("offer dates: running today, a salesperson gives it", with20("week").success && with20("week").data.sale.offer === "This week 20%");
+    const early = with20("newyear");
+    check("...not started yet: refused, saying when it starts", !early.success && early.message === "New Year 20% is not available yet: it starts on " + oEnv.ctx.dateNice_(oDay(1)) + ". Choose another offer, or no offer.", early.message);
+    const ended = sale(OS, three, { bill_disc: 500, offer_id: "xmas" });
+    check("...ended yesterday, though still On: refused, saying when it ended", !ended.success && ended.message === "Christmas is no longer available: it ended on " + oEnv.ctx.dateNice_(oDay(-1)) + ". Choose another offer, or no offer.", ended.message);
+    check("...a manager can't give an ended offer either", /ended on/.test(sale(OM, three, { bill_disc: 500, offer_id: "xmas" }).message));
+    check("...its first day counts", with20("firstday").success);
+    check("...its last day counts", with20("lastday").success);
+    check("...From only: on and on", with20("fromonly").success);
+    check("...To only: until then", with20("toonly").success);
+    const sx = sale(OS, three, {});
+    const xEnded = oc("exchange", { client_ref: "of-x2", sale_id: sx.data.sale.id, items: [{ sale_item_id: sx.data.items[0].id, qty: 1, restock: true }], reason: "Wrong size",
+        lines: three, bill_disc: 500, offer_id: "xmas", payments: [{ method: "cash", amount: 99999 }], refund_method: "cash" }, OS);
+    check("...an exchange's new bill can't carry an ended offer, and nothing is written", !xEnded.success && /ended on/.test(xEnded.message) && oc("getSale", { id: sx.data.sale.id }).data.sale.status === "completed", xEnded.message);
+    // an app from before offer dates edits "This week" (its sheet sends no from/to): the dates stay
+    const oldEdit = withDates.map((o) => (o.id === "week" ? { id: o.id, name: "This week 25%", type: "pct", pct: 25, active: true } : o));
+    check("offer dates: an edit from an app without dates keeps them", save(JSON.stringify(oldEdit)).success && (() => {
+        const w = offersNow(OS).find((o) => o.id === "week");
+        return w.pct === 25 && w.from === oDay(-2) && w.to === oDay(2);
+    })(), offersNow(OS).find((o) => o.id === "week"));
+    const cleared = offersNow(OS).map((o) => (o.id === "week" ? Object.assign({}, o, { from: "", to: "" }) : o));
+    check("...an edit with them blank clears them", save(JSON.stringify(cleared)).success && (() => {
+        const w = offersNow(OS).find((o) => o.id === "week");
+        return w.from === undefined && w.to === undefined;
+    })());
+    const offWithin = offersNow(OS).map((o) => (o.id === "firstday" ? Object.assign({}, o, { active: false }) : o));
+    save(JSON.stringify(offWithin));
+    check("...Off inside its dates is off", /switched off/.test(with20("firstday").message));
+
     // offers damaged in the Sheet by hand: billing carries on without offers, and other settings still save
     oEnv.ctx.resetReqCache_();
     oEnv.ctx.setSetting_("offers", "[{oops", 0);

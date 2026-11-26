@@ -80,7 +80,8 @@ const NIGHTLY_KEYS_ = ["nightly_report", "nightly_report_hour"];
  * The owner's offers, checked and tidied before they are kept: whatever the app sent, what is stored
  * is a plain list checkout can rely on. Kinds and limits as in offerDiscount_ (gst.gs).
  */
-function cleanOffers_(raw) {
+function cleanOffers_(raw, before) {
+    const was = indexBy_((before || []).filter((o) => o && o.id), "id"); // the offers as kept until now
     let list = raw;
     if (typeof raw === "string") {
         try {
@@ -101,20 +102,44 @@ function cleanOffers_(raw) {
         if (seen[id]) id = id.slice(0, 16) + "-" + (i + 1);
         seen[id] = true;
         const active = o.active !== false && o.active !== "no";
+        const dates = offerDates_(o, was[str_(o.id)], name);
         if (o.type === "pct") {
             const pct = r2_(num_(o.pct));
             if (!(pct >= 1 && pct <= 90)) fail_(name + ": the discount must be between 1% and 90%");
-            return { id, name, type: "pct", pct, active };
+            return Object.assign({ id, name, type: "pct", pct, active }, dates);
         }
         if (o.type === "buy") {
             const buy = num_(o.buy);
             const pay = num_(o.pay);
             if (Math.floor(buy) !== buy || Math.floor(pay) !== pay || !(pay >= 1 && buy > pay && buy <= 10))
                 fail_(name + ": buy and pay must be whole numbers, pay at least 1 and less than buy (buy up to 10)");
-            return { id, name, type: "buy", buy, pay, active };
+            return Object.assign({ id, name, type: "buy", buy, pay, active }, dates);
         }
         fail_(name + ": choose % off or buy-and-pay");
     });
+}
+
+/**
+ * An offer's From / To (both days included): real dates, From not after To; kept only when set. An app
+ * from before offer dates sends an edited offer with neither key: the dates already kept for it stay.
+ * (The app now always sends both, "" to clear one.)
+ */
+function offerDates_(o, kept, name) {
+    const src = !("from" in o) && !("to" in o) ? kept || {} : o;
+    const day = (v, what) => {
+        const s = str_(v);
+        if (!s) return "";
+        const d = new Date(s + "T00:00:00Z");
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(d) || d.toISOString().slice(0, 10) !== s) fail_(name + ": the " + what + " date is not a real date");
+        return s;
+    };
+    const from = day(src.from, "From");
+    const to = day(src.to, "To");
+    if (from && to && from > to) fail_(name + ": the From date is after the To date");
+    const out = {};
+    if (from) out.from = from;
+    if (to) out.to = to;
+    return out;
 }
 
 function apiSaveSettings_(p, ctx) {
@@ -138,7 +163,7 @@ function apiSaveSettings_(p, ctx) {
     // damaged in the Sheet by hand never stop the owner saving anything else
     if (vals.offers !== undefined) {
         if (str_(vals.offers) === str_(setting_("offers"))) delete vals.offers;
-        else vals.offers = JSON.stringify(cleanOffers_(vals.offers));
+        else vals.offers = JSON.stringify(cleanOffers_(vals.offers, offersOf_(setting_("offers"))));
     }
     if (vals.nightly_report_hour !== undefined) {
         const h = parseInt(vals.nightly_report_hour, 10);

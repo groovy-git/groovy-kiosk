@@ -83,6 +83,17 @@ function runTests() {
     eq("offer: a free piece is worth its price after its line discount", offerDiscount_(b3p2, [pc(1000, 1), pc(800, 1), pc(500, 2, 200)]), 400);
     eq("offer: none", offerDiscount_(null, [pc(1000, 3)]), 0);
     eq("offers: unreadable setting reads as none", offersOf_("not json").length, 0);
+    // offer dates: both days included; no date = no limit on that side; Off is off whatever the dates
+    const xmas = { name: "Christmas", type: "buy", buy: 3, pay: 2, active: true, from: "2026-12-20", to: "2026-12-28" };
+    eq("offer dates: the day before is not yet", offerLive_(xmas, "2026-12-19").ok, false);
+    eq("offer dates: the first day counts", offerLive_(xmas, "2026-12-20").ok, true);
+    eq("offer dates: the last day counts", offerLive_(xmas, "2026-12-28").ok, true);
+    eq("offer dates: the day after has ended", offerLive_(xmas, "2026-12-29").why, "is no longer available: it ended on 28 Dec 2026");
+    eq("offer dates: not started says when", offerLive_(xmas, "2026-12-01").why, "is not available yet: it starts on 20 Dec 2026");
+    eq("offer dates: From only runs on and on", offerLive_({ active: true, from: "2026-12-20" }, "2027-06-01").ok, true);
+    eq("offer dates: To only runs until then", offerLive_({ active: true, to: "2026-12-28" }, "2026-01-01").ok, true);
+    eq("offer dates: no dates always runs", offerLive_({ active: true }, "2030-01-01").ok, true);
+    eq("offer dates: Off within its dates is off", offerLive_(Object.assign({}, xmas, { active: false }), "2026-12-24").ok, false);
 
     // phone normalisation
     eq("phone +91", normPhone_("+91 98765 43210"), "9876543210");

@@ -2,10 +2,11 @@ import { useEffect, useState } from "react";
 import { Plus, Mail, Store, Pencil, Trash2 } from "lucide-react";
 import { useApp } from "../store";
 import { api } from "../lib/api";
-import { offersOf } from "../lib/cart";
+import { offerLive, offersOf } from "../lib/cart";
 import { runBusy } from "../lib/busy";
+import { fmtDate, istDate } from "../lib/format";
 import TopBar from "../components/TopBar";
-import { Button, Chips, Field, Seg, Sheet, SkeletonList, useConfirm } from "../components/ui";
+import { Button, Chips, DateField, Field, Seg, Sheet, SkeletonList, useConfirm } from "../components/ui";
 
 const GST = [0, 5, 12, 18, 28];
 
@@ -162,6 +163,25 @@ const offerKind = (o) =>
     : `Buy ${o.buy}, pay for ${o.pay}: the cheapest ${o.buy - o.pay === 1 ? "item is" : o.buy - o.pay + " items are"} free`;
 const suggestedName = (o) => (o.type === "pct" ? (Number(o.pct) > 0 ? `${Number(o.pct)}% off` : "") : Number(o.buy) > 0 && Number(o.pay) > 0 ? `Buy ${Number(o.buy)}, pay for ${Number(o.pay)}` : "");
 
+// "20 Dec – 28 Dec 2026" / "From 20 Dec 2026" / "Until 28 Dec 2026" / "" (every day)
+const offerDates = (o) => {
+  if (o.from && o.to) {
+    const f = fmtDate(o.from);
+    const t = fmtDate(o.to);
+    return (f.slice(-4) === t.slice(-4) ? f.slice(0, -5) : f) + " – " + t;
+  }
+  return o.from ? "From " + fmtDate(o.from) : o.to ? "Until " + fmtDate(o.to) : "";
+};
+
+// beside a dated offer: whether staff can pick it today (Off is shown by its own switch)
+function OfferDatesBadge({ o }) {
+  if (!o.from && !o.to) return null;
+  const s = offerLive({ ...o, active: true }, istDate());
+  if (s === "ended") return <span className="badge bad">Ended</span>;
+  if (s === "soon") return <span className="badge gold">Starts {fmtDate(o.from).slice(0, -5)}</span>;
+  return o.active === false ? null : <span className="badge ok">On now</span>;
+}
+
 // kept as the `offers` setting (JSON), saved with the page's Save like the rest of Billing
 function OffersCard({ value, onChange }) {
   const offers = offersOf({ offers: value });
@@ -176,7 +196,10 @@ function OffersCard({ value, onChange }) {
           <Plus size={16} /> Add offer
         </button>
       </div>
-      <div className="hint">Staff pick one at checkout. A salesperson can give an offer in full even when it is more than their discount limit.</div>
+      <div className="hint">
+        Staff pick one at checkout. A salesperson can give an offer in full even when it is more than their discount limit. An offer with dates is given only on those days;
+        one without runs every day until you switch it Off.
+      </div>
       {offers.length === 0 ? (
         <div className="small muted mt">No offers yet.</div>
       ) : (
@@ -184,8 +207,12 @@ function OffersCard({ value, onChange }) {
           {offers.map((o) => (
             <div key={o.id} className="list-item" style={{ cursor: "default", flexWrap: "wrap" }}>
               <div className="grow">
-                <div className="title">{o.name}</div>
+                <div className="title row gap-s" style={{ flexWrap: "wrap" }}>
+                  <span>{o.name}</span>
+                  <OfferDatesBadge o={o} />
+                </div>
                 <div className="sub">{offerKind(o)}</div>
+                <div className="sub">{offerDates(o) || "Every day"}</div>
               </div>
               <div className="row" style={{ flexBasis: "100%", marginTop: 6 }}>
                 <div style={{ width: 120 }}>
@@ -244,19 +271,32 @@ function OfferSheet({ offer, onClose, onDone }) {
   const buy = Number(o.buy);
   const pay = Number(o.pay);
   const numbersOk = o.type === "pct" ? pct >= 1 && pct <= 90 : Number.isInteger(buy) && Number.isInteger(pay) && pay >= 1 && buy > pay && buy <= 10;
+  const datesOk = !(o.from && o.to && o.from > o.to);
+  // the dates are always sent, "" when there are none, so the server can tell "cleared" from an older app
+  // that knows nothing of dates
+  const dates = { from: o.from || "", to: o.to || "" };
   const done = () =>
     onDone(
       o.type === "pct"
-        ? { id: offer.id, name, type: "pct", pct, active: offer.active !== false }
-        : { id: offer.id, name, type: "buy", buy, pay, active: offer.active !== false },
+        ? { id: offer.id, name, type: "pct", pct, active: offer.active !== false, ...dates }
+        : { id: offer.id, name, type: "buy", buy, pay, active: offer.active !== false, ...dates },
     );
+  const datesHint = !datesOk
+    ? ""
+    : o.from && o.to
+      ? `Given from ${fmtDate(o.from)} to ${fmtDate(o.to)}, both days included, while it is On.`
+      : o.from
+        ? `Given from ${fmtDate(o.from)} on, while it is On.`
+        : o.to
+          ? `Given until ${fmtDate(o.to)}, while it is On.`
+          : "No dates: given every day until you switch it Off.";
   return (
     <Sheet
       open
       onClose={onClose}
       title={offer.id ? "Edit offer" : "New offer"}
       footer={
-        <Button className="block big" disabled={!numbersOk || !name} onClick={done}>
+        <Button className="block big" disabled={!numbersOk || !name || !datesOk} onClick={done}>
           Done
         </Button>
       }
@@ -294,6 +334,21 @@ function OfferSheet({ offer, onClose, onDone }) {
       <Field label="Name on the bill" hint={suggested ? `Leave empty for “${suggested}”. Up to 30 letters.` : "Up to 30 letters."}>
         <input className="input" maxLength={30} placeholder={suggested} value={o.name || ""} onChange={(e) => setO({ ...o, name: e.target.value })} />
       </Field>
+      {/* optional: a seasonal offer (Christmas, 20–28 Dec) is given only on those days */}
+      <div className="grid-2">
+        <Field label="From (optional)">
+          <DateField value={o.from || ""} max={o.to || undefined} onChange={(e) => setO({ ...o, from: e.target.value })} aria-label="From" />
+        </Field>
+        <Field label="To (optional)">
+          <DateField value={o.to || ""} min={o.from || undefined} onChange={(e) => setO({ ...o, to: e.target.value })} aria-label="To" />
+        </Field>
+      </div>
+      <div className={"hint mb" + (datesOk ? "" : " bad-text")}>{datesOk ? datesHint : "The From date is after the To date."}</div>
+      {(o.from || o.to) && (
+        <button type="button" className="btn ghost small" onClick={() => setO({ ...o, from: "", to: "" })}>
+          Clear dates
+        </button>
+      )}
     </Sheet>
   );
 }

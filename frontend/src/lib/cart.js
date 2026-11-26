@@ -76,6 +76,24 @@ export function offersOf(settings) {
 }
 
 /**
+ * Whether an offer can be given on `today` ("yyyy-MM-dd", India time): switched on, and the day inside its
+ * From–To, both days included. An offer without dates runs every day until it is switched off. Same rule
+ * as the server's offerLive_ (backend/gst.gs), which checks it again by its own clock on save.
+ * "soon" / "ended" / "off" says why not.
+ */
+export function offerLive(o, today) {
+  if (!o || o.active === false) return "off";
+  if (o.from && today < o.from) return "soon";
+  if (o.to && today > o.to) return "ended";
+  return "live";
+}
+
+/** The offers staff can pick today. */
+export function liveOffers(settings, today) {
+  return offersOf(settings).filter((o) => offerLive(o, today) === "live");
+}
+
+/**
  * What an offer takes off, in rupees — same maths as the server's offerDiscount_ (backend/gst.gs), which
  * checks it again on save. lines: [{price, qty, discount, unit}], discount = rupees off the whole line.
  *  - % off: that share of the bill after item discounts.

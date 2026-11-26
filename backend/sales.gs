@@ -100,11 +100,14 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
 
     const bill = computeBill_(priced, p.bill_disc, s.round_off !== "no");
 
-    // an offer picked at checkout must be one of the owner's, switched on; what it is worth is worked out here
+    // an offer picked at checkout must be one of the owner's, switched on and running today (its dates, by
+    // this server's clock, not the phone's); what it is worth is worked out here
     let offer = null;
     if (p.offer_id) {
-        offer = offersOf_(s.offers).filter((o) => String(o.id) === String(p.offer_id) && o.active !== false)[0] || null;
+        offer = offersOf_(s.offers).filter((o) => String(o.id) === String(p.offer_id))[0] || null;
         if (!offer) fail_("This offer is no longer available. Choose another, or no offer.");
+        const live = offerLive_(offer, d10_(p._at || nowStr_()));
+        if (!live.ok) fail_(offer.name + " " + live.why + ". Choose another offer, or no offer.");
     }
 
     if (role === "salesperson") {

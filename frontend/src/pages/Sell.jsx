@@ -8,9 +8,9 @@ import { NeedBranch } from "../components/Branch";
 import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
 import { searchItems, lookupBarcode, imageUrl } from "../lib/catalog";
 import { PAGE, MIN_SEARCH, useSearchQuery, useMoreOnScroll } from "../lib/listing";
-import { addLine, computeBill, offerFill, offersOf, qtyInCart } from "../lib/cart";
+import { addLine, computeBill, offerFill, liveOffers, qtyInCart } from "../lib/cart";
 import { beepError, beepOk, unlockAudio } from "../lib/feedback";
-import { inr, initials } from "../lib/format";
+import { inr, initials, istDate } from "../lib/format";
 import CartSheet from "./sell/CartSheet";
 import CheckoutSheet from "./sell/CheckoutSheet";
 import LooseSheet from "./sell/LooseSheet";
@@ -20,6 +20,7 @@ import ReviewSheet from "./sell/ReviewSheet";
 
 export default function Sell() {
   const { catalog, cart, setCart, settings, toast, isAllBranches, role } = useApp();
+  const today = istDate(); // offers run by date: an app left open past midnight works out the next day's
   const [q, setQ] = useState("");
   const query = useSearchQuery(q);
   const [drawn, setDrawn] = useState(PAGE);
@@ -106,10 +107,11 @@ export default function Sell() {
       .filter(Boolean);
     // an offer still on its own amount is worked out on the bill as it is now: items added or taken off
     // after it was picked change what it is worth
-    const offer = cart.offer_auto ? offersOf(settings).find((o) => o.id === cart.offer_id && o.active !== false) : null;
+    // (only one running today: an ended or switched-off offer is taken off the bill at checkout)
+    const offer = cart.offer_auto ? liveOffers(settings, today).find((o) => o.id === cart.offer_id) : null;
     const billDisc = offer ? offerFill(offer, lines, role === "salesperson", Number(settings.salesman_max_disc_pct || 10)) : Number(cart.bill_disc) || 0;
     return computeBill(lines, billDisc, settings.round_off !== "no");
-  }, [cart, catalog, settings, role]);
+  }, [cart, catalog, settings, role, today]);
   const pieces = cart.lines.reduce((s, l) => s + (catalog.byVariant.get(l.variant_id)?.unit === "ml" ? 1 : l.qty), 0);
 
   if (isAllBranches)

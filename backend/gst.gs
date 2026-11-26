@@ -61,8 +61,9 @@ function computeBill_(lines, billDisc, roundToRupee) {
 
 /**
  * Offers the owner sets up (Settings → Billing → Offers), kept as JSON in the `offers` setting:
- *   {id, name, type: "pct", pct, active}        e.g. 10% off the bill
- *   {id, name, type: "buy", buy, pay, active}   e.g. buy 3, pay for 2
+ *   {id, name, type: "pct", pct, active, from?, to?}        e.g. 10% off the bill
+ *   {id, name, type: "buy", buy, pay, active, from?, to?}   e.g. buy 3, pay for 2
+ * from / to: "yyyy-MM-dd", both days included (India time); missing = no limit on that side.
  * Unreadable JSON reads as no offers, so a damaged setting never stops billing.
  */
 function offersOf_(raw) {
@@ -72,6 +73,19 @@ function offersOf_(raw) {
     } catch (e) {
         return [];
     }
+}
+
+/**
+ * Whether an offer can be given on `day` ("yyyy-MM-dd"): switched on, and the day inside its dates.
+ * {ok: true} or {ok: false, why: "is no longer available: it ended on 28 Dec 2026"}, to follow its name.
+ * The app decides the same way (offerLive in frontend/src/lib/cart.js) to show it at checkout; this is the
+ * check that counts.
+ */
+function offerLive_(o, day) {
+    if (!o || o.active === false) return { ok: false, why: "is no longer available (switched off)" };
+    if (o.from && day < o.from) return { ok: false, why: "is not available yet: it starts on " + dateNice_(o.from) };
+    if (o.to && day > o.to) return { ok: false, why: "is no longer available: it ended on " + dateNice_(o.to) };
+    return { ok: true };
 }
 
 /**
