@@ -15,6 +15,17 @@ import TopBar from "../components/TopBar";
 import CameraScanner from "../components/CameraScanner";
 import { Button, Chips, Empty, Field, SearchBar, Seg, Sheet, SkeletonList, StockBadge, Thumb, useConfirm } from "../components/ui";
 
+// What each pill of the product list shows. "Sold at": low and out are only what this branch sells; a size
+// it doesn't sell is listed under All while some are left there (shown), and the owner and managers find
+// every such size under "Not sold here" to change it. Low includes the empty shelves, as Home's card does.
+const PILL = {
+  all: (i) => i.active && i.shown,
+  low: (i) => i.active && i.here && isLow(i),
+  out: (i) => i.active && i.here && i.stock <= 0,
+  notsold: (i) => i.active && !i.here,
+  hidden: (i) => !i.active,
+};
+
 export default function Stock({ tab }) {
   const { isManager, isMover, canTransfer, multiBranch } = useApp();
   // a stock mover has the product list and the transfers, never what was bought in (it shows cost)
@@ -56,18 +67,14 @@ function Products() {
   const [importOpen, setImportOpen] = useState(false);
   const [confirm, confirmNode] = useConfirm();
 
-  // "Sold at": low and out are only what this branch sells; a size it doesn't sell is listed while some
-  // are left (shown), and the owner and managers find all of them under "Not sold here" to change it
-  const notSoldCount = useMemo(() => catalog.items.filter((i) => i.active && !i.here).length, [catalog]);
-  const list = useMemo(() => {
-    let l = catalog.items;
-    if (filter === "low") l = l.filter((i) => i.active && i.here && isLow(i));
-    else if (filter === "out") l = l.filter((i) => i.active && i.here && i.stock <= 0);
-    else if (filter === "hidden") l = l.filter((i) => !i.active);
-    else if (filter === "notsold") l = l.filter((i) => i.active && !i.here);
-    else l = l.filter((i) => i.active && i.shown);
-    return searchItems(l, query);
-  }, [catalog, query, filter]);
+  // how many each pill lists — by the very rules the lists use, so a number is what tapping it shows.
+  // The whole product list, not the search: the pills say how many there are, search narrows below them.
+  const counts = useMemo(() => {
+    const n = Object.fromEntries(Object.keys(PILL).map((k) => [k, 0]));
+    for (const i of catalog.items) for (const k in PILL) if (PILL[k](i)) n[k]++;
+    return n;
+  }, [catalog]);
+  const list = useMemo(() => searchItems(catalog.items.filter(PILL[filter] || PILL.all), query), [catalog, query, filter]);
 
   // a new search or pill starts from the top again
   useEffect(() => setShown(PAGE), [query, filter]);
@@ -112,11 +119,11 @@ function Products() {
           value={filter}
           onChange={setFilter}
           options={[
-            { value: "all", label: `All (${catalog.items.filter((i) => i.active && i.shown).length})` },
-            { value: "low", label: "Low stock" },
-            { value: "out", label: "Out of stock" },
-            ...(isManager && (notSoldCount > 0 || filter === "notsold") ? [{ value: "notsold", label: `Not sold here (${notSoldCount})` }] : []),
-            ...(isManager ? [{ value: "hidden", label: "Hidden" }] : []),
+            { value: "all", label: `All (${counts.all})` },
+            { value: "low", label: `Low stock (${counts.low})` },
+            { value: "out", label: `Out of stock (${counts.out})` },
+            ...(isManager && (counts.notsold > 0 || filter === "notsold") ? [{ value: "notsold", label: `Not sold here (${counts.notsold})` }] : []),
+            ...(isManager ? [{ value: "hidden", label: `Hidden (${counts.hidden})` }] : []),
           ]}
         />
       </div>

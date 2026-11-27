@@ -23,7 +23,7 @@ function branchName_(id) {
 }
 
 function branchOut_(b) {
-    return { id: b.id, name: b.name, code: b.code, address: b.address, phone: b.phone, active: b.active, gst_off: b.gst_off ? 1 : 0, review_link: b.review_link || "" };
+    return { id: b.id, name: b.name, code: b.code, address: b.address, phone: b.phone, active: b.active, gst_off: b.gst_off ? 1 : 0, review_link: b.review_link || "", upi_id: b.upi_id || "" };
 }
 
 // a branch that isn't GST-registered: its bills are recorded with no GST (and left out of GST reports)
@@ -238,8 +238,11 @@ function apiSaveBranch_(p, ctx) {
     if (bad.length) fail_("Not a valid email: " + bad.join(", "));
     const link = str_(p.review_link);
     if (link && (!/^https:\/\/\S+$/.test(link) || link.length > 300)) fail_("The Google review link must be a web address starting with https://");
+    // null: not sent (an older app) — the saved UPI ID is kept
+    const upi = p.upi_id === undefined || p.upi_id === null ? null : cleanUpiId_(p.upi_id);
+    let upiChange = null; // the owners are told after the save is done, so an email can never hold it up
 
-    return withLock_(() => {
+    const res = withLock_(() => {
         const all = rows_("Branches");
         if (all.some((b) => b.name.toLowerCase() === name.toLowerCase() && b.id !== Number(p.id || 0))) fail_("A branch with this name exists");
         if (all.some((b) => str_(b.code) === code && b.id !== Number(p.id || 0)))
@@ -254,14 +257,91 @@ function apiSaveBranch_(p, ctx) {
             if (!active && all.filter((x) => x.active && x.id !== b.id).length === 0) fail_("At least one branch must stay active");
             const gstOff = p.gst_off === undefined ? (b.gst_off ? 1 : 0) : p.gst_off ? 1 : 0; // an older app doesn't send it: kept
             const reviewLink = p.review_link === undefined ? str_(b.review_link) : link; // likewise
-            Object.assign(b, { name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active, gst_off: gstOff, review_link: reviewLink });
+            const wasUpi = str_(b.upi_id);
+            const upiId = upi === null ? wasUpi : upi; // likewise
+            Object.assign(b, { name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active, gst_off: gstOff, review_link: reviewLink, upi_id: upiId });
             updateRows_("Branches", [b]);
-            log_(ctx, "UPDATE", "Branches", b.id, name);
+            if (upiId !== wasUpi) upiChange = { branch: name, from: wasUpi, to: upiId };
+            log_(ctx, "UPDATE", "Branches", b.id, name + (upiChange ? " · UPI ID: " + (wasUpi || "none") + " → " + (upiId || "none") : ""));
             return { message: "Branch saved", data: branchOut_(b) };
         }
-        const b = { id: nextId_("Branches"), name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active: 1, created_at: now, gst_off: p.gst_off ? 1 : 0, review_link: link };
+        const b = { id: nextId_("Branches"), name, code, address: str_(p.address), phone: str_(p.phone), report_emails: emails.join(", "), active: 1, created_at: now, gst_off: p.gst_off ? 1 : 0, review_link: link, upi_id: upi || "" };
         appendRows_("Branches", [b]);
-        log_(ctx, "CREATE", "Branches", b.id, name + (code ? " (" + code + ")" : ""));
+        if (b.upi_id) upiChange = { branch: name, from: "", to: b.upi_id };
+        log_(ctx, "CREATE", "Branches", b.id, name + (code ? " (" + code + ")" : "") + (b.upi_id ? " · UPI ID: " + b.upi_id : ""));
         return { message: "Branch added", data: branchOut_(b) };
     });
+    if (upiChange) alertUpiChange_(upiChange, ctx);
+    return res;
+}
+
+/* ---------- the branch's UPI ID (the QR at checkout) ---------- */
+
+// "groovy@okaxis": letters, digits and . _ - before the @, the bank's handle after it
+const UPI_ID_RE_ = /^[a-z0-9._-]{2,256}@[a-z][a-z0-9.]{1,63}$/;
+
+/**
+ * A UPI ID as typed, or pasted as the text of the kiosk's own QR ("upi://pay?pa=groovy@okaxis&pn=…"), whose
+ * pa= is taken. Lower-cased; blank = none. Mirrored by upiIdFrom in the app's lib/upi.js.
+ */
+function cleanUpiId_(v) {
+    let s = str_(v);
+    if (/^upi:/i.test(s)) {
+        const m = /[?&]pa=([^&]+)/i.exec(s);
+        if (!m) fail_("That QR text has no UPI ID in it (pa=…)");
+        try {
+            s = decodeURIComponent(m[1]);
+        } catch (e) {
+            s = m[1];
+        }
+    }
+    s = s.trim().toLowerCase();
+    if (s && !UPI_ID_RE_.test(s)) fail_("Not a valid UPI ID — it looks like name@bank, e.g. groovy@okaxis");
+    return s;
+}
+
+/**
+ * The UPI ID decides whose account the checkout QR pays into, so every Owner account is told of any change:
+ * old → new, who, when — and so is the Google account that owns this script and its Sheet. An owner's login
+ * email can be changed inside the app, so someone who got into the owner's login could point it at their own
+ * address first; the Google account can't be changed from here. Never allowed to get in the way of the save
+ * (already done when this runs).
+ */
+function alertUpiChange_(c, ctx) {
+    try {
+        const to = rows_("Users")
+            .filter((u) => u.active && roleName_(u.role) === "owner" && u.email)
+            .map((u) => String(u.email).toLowerCase());
+        let google = "";
+        try {
+            google = String(Session.getEffectiveUser().getEmail() || "").toLowerCase();
+        } catch (e) {
+            /* not known here: the owners still get it */
+        }
+        if (google && to.indexOf(google) < 0) to.push(google);
+        if (!to.length) return;
+        const biz = setting_("business_name") || "Groovy Fragrances";
+        const lines = [
+            "The UPI ID that the checkout QR pays into at " + c.branch + " was " + (c.from ? "changed" : "set") + " by " + ctx.user.name + " (" + ctx.user.email + ") at " + nowStr_().slice(0, 16) + ".",
+            "Before: " + (c.from || "none") + "\nNow: " + (c.to || "none — the QR button is off at this branch"),
+            "If this was you: nothing to do. To check it, open Settings → Branches → " + c.branch + " → Test QR · ₹1 and pay ₹1 from your own phone.",
+            "If it was not you: put the right UPI ID back in Settings → Branches now, and change your password.",
+        ];
+        sendMail_(
+            to,
+            {
+                subject: biz + " Kiosk — UPI ID " + (c.from ? "changed" : "set") + " for " + c.branch,
+                text: lines.join("\n\n") + "\n\n— " + biz,
+                html:
+                    '<div style="font-family:Arial,sans-serif;max-width:480px;margin:auto;padding:24px;background:#FAF7F2">' +
+                    '<div style="background:#fff;border-radius:12px;padding:28px;border-top:5px solid #F5BF03">' +
+                    '<h2 style="margin:0 0 8px;color:#654321;font-family:Georgia,serif">' + escHtml_(biz) + "</h2>" +
+                    lines.map((l) => '<p style="color:#403B37">' + escHtml_(l).replace(/\n/g, "<br>") + "</p>").join("") +
+                    "</div></div>",
+            },
+            {},
+        );
+    } catch (e) {
+        console.error("alertUpiChange_", e);
+    }
 }

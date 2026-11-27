@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, X, UserCheck, Building2 } from "lucide-react";
+import { Plus, X, UserCheck, Building2, QrCode } from "lucide-react";
 import { useApp } from "../../store";
 import { api } from "../../lib/api";
 import { runBusy } from "../../lib/busy";
 import { liveOffers, newClientRef, offerAllowance, offerDiscount, offerFill, offerLive, offersOf } from "../../lib/cart";
 import { inr, r2, METHOD_LABEL, isMaskedPhone, istDate, fmtDate } from "../../lib/format";
 import { Button, Chips, Field, MoneyInput, Seg, Sheet, Spinner } from "../../components/ui";
+import UpiQrSheet from "./UpiQrSheet";
 
 const METHODS = ["upi", "cash", "card"]; // UPI first: most customers pay that way
 
@@ -35,6 +36,9 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   const gstOnBill = !cart.gst_hidden;
   // a branch without GST bills with none — no choice to offer (the server records such bills at 0% GST)
   const branchNoGst = !!(branch && branch.gst_off);
+  // the branch's UPI ID (Settings → Branches): a UPI payment can then be shown as a QR with its amount in it
+  const upiId = (branch && branch.upi_id) || "";
+  const [upiFor, setUpiFor] = useState(null); // the payment row whose QR is open
 
   // the owner's offers that can be given today: switched on, and today inside their dates, if they have any
   // (Settings → Billing → Offers); one can be picked for this bill
@@ -59,6 +63,7 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
   useEffect(() => {
     if (!open) return;
     setPays([{ method: "upi", amount: String(due), reference: "", auto: true }]);
+    setUpiFor(null);
     // an offer still on its own amount is worked out again (the bill may have changed since). One that
     // can't be given today any more — ended, not started, switched off or deleted since it was picked (a
     // held bill finished the next day) — leaves the bill, and so does the discount it filled in; a
@@ -442,24 +447,37 @@ export default function CheckoutSheet({ open, onClose, preview, onDone }) {
               />
             </div>
           </div>
-          {p.method !== "cash" && (
-            <input
-              className="input mt"
-              placeholder={p.method === "upi" ? "UPI ref / last 4 digits (optional)" : "Card last 4 digits (optional)"}
-              value={p.reference}
-              onChange={(e) => setPay(i, { reference: e.target.value })}
-            />
-          )}
+          {p.method === "upi" &&
+            (upiId ? (
+              <>
+                <button className="btn secondary block mt" disabled={!(Number(p.amount) > 0)} onClick={() => setUpiFor(i)}>
+                  <QrCode size={18} /> Show UPI QR · {inr(Number(p.amount) || 0)}
+                </button>
+                {/* for staff, here — not on the QR screen, which the customer is shown. Fake "paid" screens are a
+                    common counter scam: the shop's own side decides */}
+                <div className="small muted" style={{ marginTop: 6 }}>Complete the bill only after your soundbox or UPI business app shows the money.</div>
+              </>
+            ) : role === "owner" ? (
+              <div className="small muted" style={{ marginTop: 8 }}>Add this branch's UPI ID in Settings → Branches to show a QR with the amount filled in.</div>
+            ) : null)}
         </div>
       ))}
+      {/* the QR follows its row: a new amount draws it again; a row taken off or turned to cash closes it */}
+      <UpiQrSheet
+        pay={upiFor !== null && pays[upiFor] && pays[upiFor].method === "upi" && upiId ? { amount: Number(pays[upiFor].amount) || 0, upi_id: upiId, branch: branch ? branch.name : "" } : null}
+        onClose={() => setUpiFor(null)}
+      />
       {pays.length < 3 && (
         <button className="btn secondary block mt" onClick={addSplit}>
           <Plus size={18} /> Split payment
         </button>
       )}
-      <Field label="Note (optional)">
-        <input className="input mt" value={cart.notes || ""} onChange={(e) => setCart((c) => ({ ...c, notes: e.target.value }))} placeholder="e.g. gift wrap" />
-      </Field>
+      {/* the gap goes above the label (after Split payment), not between the label and its box */}
+      <div className="mt">
+        <Field label="Note (optional)">
+          <input className="input" value={cart.notes || ""} onChange={(e) => setCart((c) => ({ ...c, notes: e.target.value }))} placeholder="e.g. gift wrap" />
+        </Field>
+      </div>
     </Sheet>
   );
 }

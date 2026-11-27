@@ -3575,6 +3575,92 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("...saving it with the only open branch ticked stores blank (every branch)", one.success && stored("SA10").sold_at === "", one.message);
 }
 
+// ---- a branch's UPI ID: the checkout QR pays into it; the owner's alone, and every change is emailed to the owners ----
+{
+    const uEnv = createEnv();
+    uEnv.ctx.setupSheets();
+    const uPwd = /Password: (\S+)/.exec(uEnv.alerts.pop())[1];
+    const UT = uEnv.call("login", { email: "owner@groovy.test", password: uPwd }).data.token;
+    const oc = (a, p, b) => uEnv.call(a, p, UT, b === undefined ? 1 : b);
+    const KN = oc("saveBranch", { name: "Kalyani Nagar", code: "KN" }).data.id;
+    const kd = (o) => oc("saveBranch", Object.assign({ id: 1, name: "Kondhwa", code: "" }, o));
+    const upiOf = (id, token) => uEnv.call("bootstrap", {}, token || UT, 1).data.branches.find((b) => b.id === id).upi_id;
+    const stored = (id) => (uEnv.ctx.resetReqCache_(), uEnv.ctx.findBy_("Branches", "id", id).upi_id);
+    uEnv.mails.length = 0;
+    check("UPI: a branch starts with none", upiOf(1) === "" && upiOf(KN) === "");
+    const r1 = kd({ upi_id: "  Groovy.Kondhwa@OKAXIS " });
+    check("UPI: the owner sets Kondhwa's (trimmed, lower-cased)", r1.success && stored(1) === "groovy.kondhwa@okaxis" && r1.data.upi_id === "groovy.kondhwa@okaxis", r1);
+    check("...every phone gets it with the branches", upiOf(1) === "groovy.kondhwa@okaxis" && upiOf(KN) === "");
+    const m1 = uEnv.mails.filter((m) => /UPI ID set for Kondhwa$/.test(m.subject));
+    check("...the owners are emailed once: set, none → new, by whom", m1.length === 1 && m1[0].to === "owner@groovy.test" && /Before: none\nNow: groovy\.kondhwa@okaxis/.test(m1[0].body) && /set by .+ \(owner@groovy\.test\) at \d{4}-/.test(m1[0].body), uEnv.mails.map((m) => [m.subject, m.to, m.body]));
+    uEnv.mails.length = 0;
+    check("saved again unchanged: no email", kd({ upi_id: "groovy.kondhwa@okaxis", address: "New address" }).success && uEnv.mails.length === 0);
+    check("a save that doesn't send it (an older app) keeps it, no email", kd({ address: "x" }).success && stored(1) === "groovy.kondhwa@okaxis" && uEnv.mails.length === 0);
+    const bad = kd({ upi_id: "groovy kondhwa" });
+    check("not a UPI ID: refused, nothing changes, no email", !bad.success && /Not a valid UPI ID/.test(bad.message) && stored(1) === "groovy.kondhwa@okaxis" && uEnv.mails.length === 0, bad.message);
+    check("...nor '@bank' alone, nor a web address", !kd({ upi_id: "@okaxis" }).success && !kd({ upi_id: "https://pay.example/x" }).success && stored(1) === "groovy.kondhwa@okaxis");
+    const r2 = kd({ upi_id: "upi://pay?pa=paytmqr2810050501011abc@paytm&pn=Groovy%20Fragrances&mc=5999&mode=02&purpose=00" });
+    check("the text of the kiosk's own QR pasted: only its UPI ID is kept", r2.success && stored(1) === "paytmqr2810050501011abc@paytm", stored(1));
+    const m2 = uEnv.mails.find((m) => /UPI ID changed for Kondhwa$/.test(m.subject));
+    check("...the owners are emailed: changed, old → new", !!m2 && /Before: groovy\.kondhwa@okaxis\nNow: paytmqr2810050501011abc@paytm/.test(m2.body), m2 && m2.body);
+    check("...the log says old → new", oc("listLogs", { q: "UPI ID" }).data.some((l) => /Kondhwa · UPI ID: groovy\.kondhwa@okaxis → paytmqr2810050501011abc@paytm/.test(l.details)));
+    check("QR text with no UPI ID in it: refused", /no UPI ID in it/.test(kd({ upi_id: "upi://pay?pn=Shop&am=10" }).message) && stored(1) === "paytmqr2810050501011abc@paytm");
+    uEnv.mails.length = 0;
+    check("blank removes it (no QR button there), and the owners are told", kd({ upi_id: "" }).success && stored(1) === "" && /Now: none — the QR button is off at this branch/.test((uEnv.mails[0] || {}).body || ""));
+    const nb = oc("saveBranch", { name: "Baner", code: "BN", upi_id: "groovy.baner@ybl" });
+    check("a new branch added with one: saved, and the owners are told", nb.success && stored(nb.data.id) === "groovy.baner@ybl" && uEnv.mails.some((m) => /UPI ID set for Baner$/.test(m.subject)));
+    uEnv.mails.length = 0;
+    check("a new branch without one: no email", oc("saveBranch", { name: "Wakad", code: "WK" }).success && uEnv.mails.length === 0);
+
+    // the owner's alone: a UPI ID decides whose account the money goes to
+    const um = oc("saveUser", { name: "U Manager", email: "u-mg@x.in", role: "manager", password: "shop-pass-1", branch_id: 1 });
+    const us = oc("saveUser", { name: "U Seller", email: "u-sp@x.in", role: "salesperson", password: "shop-pass-1", branch_id: 1 });
+    check("UPI: staff for the checks below", um.success && us.success, [um.message, us.message]);
+    const lm = uEnv.call("login", { email: "u-mg@x.in", password: "shop-pass-1" });
+    const ls = uEnv.call("login", { email: "u-sp@x.in", password: "shop-pass-1" });
+    check("...they log in", lm.success && ls.success, [lm.message, ls.message]);
+    const MG = lm.success ? lm.data.token : "";
+    const SP = ls.success ? ls.data.token : "";
+    check("a manager can't set a UPI ID", uEnv.call("saveBranch", { id: KN, name: "Kalyani Nagar", code: "KN", upi_id: "thief@ybl" }, MG, KN).code === "FORBIDDEN" && stored(KN) === "");
+    check("...nor a salesperson", uEnv.call("saveBranch", { id: 1, name: "Kondhwa", code: "", upi_id: "thief@ybl" }, SP, 1).code === "FORBIDDEN" && stored(1) === "");
+    kd({ upi_id: "groovy.kondhwa@okaxis" });
+    check("a salesperson's phone gets the branch's UPI ID (to show the QR)", upiOf(1, SP) === "groovy.kondhwa@okaxis");
+
+    // someone in the owner's login points the owner's email at their own address first: the change is
+    // still emailed to the Google account that owns the shop's Sheet (owner@groovy.test in the mock)
+    const me = uEnv.call("me", {}, UT).data;
+    const ownerId = (me.user || me).id;
+    const re = oc("saveUser", { id: ownerId, name: (me.user || me).name, email: "not-the-owner@x.in", role: "owner" });
+    check("UPI: the owner's login email changed to another address", re.success, re.message);
+    uEnv.mails.length = 0;
+    kd({ upi_id: "thief.k@ybl" });
+    const mRe = uEnv.mails.find((m) => /UPI ID changed for Kondhwa$/.test(m.subject));
+    const rcpt = mRe ? mRe.to.split(",") : [];
+    check("...a UPI ID change then still reaches the Google account owner, and the new login email too", rcpt.includes("owner@groovy.test") && rcpt.includes("not-the-owner@x.in") && rcpt.length === 2, mRe && mRe.to);
+    oc("saveUser", { id: ownerId, name: (me.user || me).name, email: "owner@groovy.test", role: "owner" });
+    uEnv.mails.length = 0;
+    kd({ upi_id: "groovy.kondhwa@okaxis" });
+    check("...with the two the same address, it is sent to it once", uEnv.mails.length === 1 && uEnv.mails[0].to === "owner@groovy.test", uEnv.mails.map((m) => m.to));
+
+    // an email that can't go out never stops the save
+    const quota = uEnv.ctx.MailApp.getRemainingDailyQuota;
+    uEnv.ctx.MailApp.getRemainingDailyQuota = () => 0;
+    const q0 = kd({ upi_id: "groovy.kd2@okaxis" });
+    uEnv.ctx.MailApp.getRemainingDailyQuota = quota;
+    check("Google's daily email limit reached: the UPI ID still saves", q0.success && stored(1) === "groovy.kd2@okaxis", q0.message);
+
+    // a Sheet from before this version: asks for Setup; Setup adds the column, every branch without one
+    const bSh = uEnv.ss.getSheetByName("Branches");
+    const bKeys = Object.keys(require("vm").runInContext("SCHEMA.Branches", uEnv.ctx));
+    check("upi_id is the last Branches column (Setup adds columns only at the end)", bKeys[bKeys.length - 1] === "upi_id" && bKeys[bKeys.length - 2] === "review_link", bKeys);
+    const bCol = bSh.getRange(1, bKeys.length, bSh.getLastRow(), 1);
+    bCol.setValues(bCol.getValues().map(() => [""]));
+    const stale = oc("bootstrap", {});
+    check("a Sheet without the column asks for Setup", !stale.success && stale.code === "SETUP", stale);
+    uEnv.ctx.setupSheets();
+    check("Setup adds it back; every branch reads as having none", bSh.getRange(1, bKeys.length).getValue() === "upi_id" && upiOf(1) === "" && upiOf(KN) === "");
+}
+
 // ---- cash at the kiosk: the drawer counted on from the owner's last count (cash.gs) ----
 {
     const kEnv = createEnv();

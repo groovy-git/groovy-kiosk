@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Mail, Store, Pencil, Trash2 } from "lucide-react";
+import { Plus, Mail, Store, Pencil, Trash2, QrCode } from "lucide-react";
 import { useApp } from "../store";
 import { api } from "../lib/api";
 import { offerLive, offersOf } from "../lib/cart";
@@ -7,6 +7,8 @@ import { runBusy } from "../lib/busy";
 import { fmtDate, istDate } from "../lib/format";
 import TopBar from "../components/TopBar";
 import { Button, Chips, DateField, Field, Seg, Sheet, SkeletonList, useConfirm } from "../components/ui";
+import { upiIdFrom } from "../lib/upi";
+import UpiQrSheet from "./sell/UpiQrSheet";
 
 const GST = [0, 5, 12, 18, 28];
 
@@ -576,13 +578,14 @@ function BranchesSettings() {
                   {b.code || ""}/26-27/00001{b.address ? " · " + b.address : ""}
                 </div>
               </div>
+              {b.upi_id ? <span className="badge ok">UPI</span> : null}
               {b.gst_off ? <span className="badge">No GST</span> : null}
               {!b.active && <span className="badge">Inactive</span>}
             </button>
           ))}
         </div>
       )}
-      <button className="btn secondary block mt" onClick={() => setEdit({ name: "", code: "", address: "", phone: "", report_emails: "", active: 1, gst_off: 0, review_link: "" })}>
+      <button className="btn secondary block mt" onClick={() => setEdit({ name: "", code: "", address: "", phone: "", report_emails: "", active: 1, gst_off: 0, review_link: "", upi_id: "" })}>
         <Plus size={18} /> Add branch
       </button>
       {edit && (
@@ -606,11 +609,17 @@ function BranchSheet({ b, prefix, onClose, onSaved }) {
   const { toast } = useApp();
   const [f, setF] = useState(b);
   const [busy, setBusy] = useState(false);
+  const [testQr, setTestQr] = useState(false);
   const code = (f.code || "").toUpperCase();
+  // the UPI ID as typed or pasted (the text of the kiosk's own QR gives its ID). Not in the branch at all:
+  // a list from an older server — then it is not sent, and the server keeps what it has
+  const upi = upiIdFrom(f.upi_id);
+  const upiKnown = f.upi_id !== undefined && f.upi_id !== null;
   const save = async () => {
+    if (!upi.ok) return toast("Not a valid UPI ID — it looks like name@bank, e.g. groovy@okaxis", "error", 4500);
     setBusy(true);
     try {
-      const r = await runBusy("Saving branch…", () => api("saveBranch", { ...f, code }));
+      const r = await runBusy("Saving branch…", () => api("saveBranch", { ...f, code, upi_id: upiKnown ? upi.id : undefined }));
       toast(r.message, "success");
       await onSaved();
     } catch (e) {
@@ -645,6 +654,32 @@ function BranchSheet({ b, prefix, onClose, onSaved }) {
       >
         <input className="input" inputMode="url" value={f.review_link || ""} onChange={(e) => setF({ ...f, review_link: e.target.value.trim() })} placeholder="https://g.page/r/…/review" />
       </Field>
+      <Field
+        label="UPI ID (for the QR at checkout)"
+        error={upi.ok ? "" : "Not a valid UPI ID — it looks like name@bank, e.g. groovy@okaxis"}
+        hint={
+          upi.id && upi.id !== String(f.upi_id || "").trim()
+            ? `UPI ID: ${upi.id}`
+            : "e.g. groovy@okaxis, or paste the text of this kiosk's UPI QR. Customers' UPI payments go to this ID, so only you can change it — and every change is emailed to you."
+        }
+      >
+        <input
+          className="input"
+          inputMode="email"
+          autoCapitalize="none"
+          autoCorrect="off"
+          spellCheck={false}
+          value={f.upi_id || ""}
+          onChange={(e) => setF({ ...f, upi_id: e.target.value })}
+          placeholder="name@bank"
+        />
+      </Field>
+      {upi.ok && upi.id && (
+        <button className="btn secondary block mb" onClick={() => setTestQr(true)}>
+          <QrCode size={18} /> Test QR · ₹1
+        </button>
+      )}
+      <UpiQrSheet pay={testQr && upi.ok && upi.id ? { amount: 1, upi_id: upi.id, branch: f.name } : null} onClose={() => setTestQr(false)} />
       <div className="field">
         <label>GST</label>
         <Seg value={f.gst_off ? 0 : 1} onChange={(v) => setF({ ...f, gst_off: v ? 0 : 1 })} options={[{ value: 1, label: "Enabled" }, { value: 0, label: "Disabled" }]} />

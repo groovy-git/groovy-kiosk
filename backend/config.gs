@@ -270,6 +270,9 @@ const SCHEMA = {
         created_at: "d",
         gst_off: "n", // 1 = branch not GST-registered: its bills carry no GST. Blank/0 = GST on (every older branch)
         review_link: "s", // the branch's Google review page, shown as a QR code when a review is taken
+        // the branch's UPI ID ("groovy@okaxis"): Checkout shows a QR with it and the amount to pay. Owner only;
+        // every change is emailed to the owners (alertUpiChange_ in branches.gs). Blank = no QR button
+        upi_id: "s",
     },
     Branch_Stock: { variant_id: "n", branch_id: "n", qty: "n" },
     Transfers: {
