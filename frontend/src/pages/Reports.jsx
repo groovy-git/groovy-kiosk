@@ -242,7 +242,7 @@ function Report({ type, d, reload, onMonth }) {
       <>
         <div className="grid-2">
           <Stat cls="brown" label="Net profit" value={inr(Math.round(d.net_profit))} />
-          <Stat cls="gold" label="Gross margin" value={`${d.margin_pct}%`} />
+          <Stat cls="gold" label="Gross margin (without GST)" value={`${d.margin_pct}%`} />
         </div>
         <div className="card mt">
           <div className="kv"><span className="k">Sales (incl. GST)</span><span>{inr(d.sales_incl_gst)}</span></div>
@@ -580,7 +580,8 @@ function PerformanceReport({ d, reload, onMonth }) {
         <div className="kv small"><span className="k">Shop expenses</span><span>{inr(-t.expenses)}</span></div>
         <div className="kv total"><span>Profit</span><span style={red(t.profit)}>{rupees(t.profit)}</span></div>
         <div className="tiny muted mt">
-          Margin {t.margin}% of revenue. Cost is the average purchase cost from Stock In; expenses are all those entered for these dates.
+          Margin {t.margin}% of revenue without GST — gross profit before shop expenses. Cost is the average purchase cost entered in Stock In, as entered (enter it without GST if
+          you claim that GST back); expenses are all those entered for these dates.
         </div>
       </div>
 

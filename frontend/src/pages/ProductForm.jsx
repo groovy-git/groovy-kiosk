@@ -16,6 +16,13 @@ const GST = [0, 5, 12, 18, 28];
 // `sold`: the branch ids ticked under "Sold at" — a new size is sold at every branch; `sold0`: as it opened
 const blankVariant = (barcode = "", sold = []) => ({ id: 0, size_label: "", size_ml: "", sku: "", barcode, mrp: "", sell_price: "", cost: "", opening_stock: "", reorder_level: "3", max_level: "", active: 1, sold, sold0: sold.join(",") });
 
+// gross margin on the selling price without GST — the same as Reports (revenue without GST − cost) ÷ revenue.
+// The selling price includes GST; the cost is as typed
+const marginOf = (sellPrice, cost, gstRate) => {
+  const ex = (Number(sellPrice) * 100) / (100 + (Number(gstRate) || 0));
+  return Math.round(((ex - Number(cost)) / ex) * 100);
+};
+
 // "Sold at" as ticks over the open branches: blank (every branch) ticks them all
 const soldTicks = (soldAt, openIds) => {
   const list = soldList(soldAt);
@@ -419,8 +426,9 @@ export default function ProductForm({ id }) {
               </div>
               {multiBranch && <SoldAt v={v} branches={branches} error={soldError(v)} onToggle={(id, on) => toggleSold(i, id, on)} />}
               {Number(v.sell_price) > 0 && Number(v.cost) > 0 && (
+                // on the price without GST, as Reports work it out (₹1,180 at 18% → ₹1,000; cost ₹400 → 60%)
                 <div className="tiny muted">
-                  Margin {Math.round(((Number(v.sell_price) - Number(v.cost)) / Number(v.sell_price)) * 100)}% (before GST)
+                  Margin {marginOf(v.sell_price, v.cost, p.gst_rate)}% (on price without GST)
                 </div>
               )}
             </div>
