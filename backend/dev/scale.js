@@ -233,6 +233,10 @@ api("bootstrap full", "bootstrap", {}, T, B1, (d) => d && { user: d.user, branch
 api("report performance month", "report", { type: "performance", from: "2026-09-01", to: "2026-09-27" }, T, B1);
 api("report performance 12 months, first", "report", { type: "performance", from: "2025-10-01", to: "2026-09-27" }, T, B1);
 api("report performance 12 months, again", "report", { type: "performance", from: "2025-10-01", to: "2026-09-27" }, T, B1);
+// day by day (2–31 days): last month is kept by now (its total), its days are read once, then cached
+api("report performance last month, first", "report", { type: "performance", from: "2026-08-01", to: "2026-08-31" }, T, B1);
+api("report performance last month, again", "report", { type: "performance", from: "2026-08-01", to: "2026-08-31" }, T, B1);
+api("report performance 15 days", "report", { type: "performance", from: "2026-09-13", to: "2026-09-27" }, T, B1);
 // a salesperson's Home, the screen opened most at the counter (on every backend, so it compares)
 api("dashboard b1, salesperson", "dashboard", {}, S, B1);
 // Cash at the kiosk, once the owner has counted a drawer (after everything else, and only on a backend that

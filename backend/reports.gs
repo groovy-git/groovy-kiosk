@@ -645,31 +645,51 @@ function oldestKeptMonth_() {
 }
 
 /**
- * The sales side of each month from `from` to `to`: one read of the bills, their lines and credit notes
- * for the whole span, then sorted into months. Expenses are not in here; they can be backdated, so they
- * are always added fresh (reportPerformance_).
+ * The sales side of each month from `from` to `to` — and, with `withDays`, of each day: one read of the
+ * bills, their lines and credit notes for the whole span, then sorted into months (and days) in one pass.
+ * { months: {"yyyy-mm": figures}, days: {"yyyy-mm-dd": figures} }; a day's figures are a month's without
+ * its leaderboard. Expenses are not in here; they can be backdated, so they are always added fresh
+ * (reportPerformance_).
  */
-function monthFigures_(ctx, from, to) {
+function spanFigures_(ctx, from, to, withDays) {
     const { sales, returns } = scope_(ctx, from, to);
     const rs = sales.filter((s) => inRange_(s.date, from, to));
     const rets = returns.filter((r) => inRange_(r.at, from, to));
     const saleLines = saleItemsFor_(rs.map((s) => s.id));
     const returnLines = returnItemsFor_(rets.map((r) => r.id));
     const first = firstBillByCustomer_();
-    // each bill, credit note and line into its month, in one pass
-    const by = {};
-    const bucket = (m) => (by[m] = by[m] || { sales: [], returns: [], saleLines: [], returnLines: [] });
-    const saleMonth = {};
-    const returnMonth = {};
-    rs.forEach((s) => bucket((saleMonth[s.id] = d10_(s.date).slice(0, 7))).sales.push(s));
-    rets.forEach((r) => bucket((returnMonth[r.id] = d10_(r.at).slice(0, 7))).returns.push(r));
-    saleLines.forEach((i) => saleMonth[i.sale_id] && by[saleMonth[i.sale_id]].saleLines.push(i));
-    returnLines.forEach((i) => returnMonth[i.return_id] && by[returnMonth[i.return_id]].returnLines.push(i));
-    const out = {};
-    Object.keys(by).forEach((m) => {
-        const b = by[m];
+    // each bill, credit note and line into its month (and day), in one pass
+    const months = {};
+    const days = {};
+    const bucket = (store, k) => (store[k] = store[k] || { sales: [], returns: [], saleLines: [], returnLines: [] });
+    const saleDay = {};
+    const returnDay = {};
+    rs.forEach((s) => {
+        const d = (saleDay[s.id] = d10_(s.date));
+        bucket(months, d.slice(0, 7)).sales.push(s);
+        if (withDays) bucket(days, d).sales.push(s);
+    });
+    rets.forEach((r) => {
+        const d = (returnDay[r.id] = d10_(r.at));
+        bucket(months, d.slice(0, 7)).returns.push(r);
+        if (withDays) bucket(days, d).returns.push(r);
+    });
+    saleLines.forEach((i) => {
+        const d = saleDay[i.sale_id];
+        if (!d) return;
+        months[d.slice(0, 7)].saleLines.push(i);
+        if (withDays) days[d].saleLines.push(i);
+    });
+    returnLines.forEach((i) => {
+        const d = returnDay[i.return_id];
+        if (!d) return;
+        months[d.slice(0, 7)].returnLines.push(i);
+        if (withDays) days[d].returnLines.push(i);
+    });
+    // a month's and a day's figures are worked out the same way
+    const figures = (b, withPeople) => {
         const pr = profitOf_(b.sales, b.returns, 0, b.saleLines, b.returnLines);
-        out[m] = {
+        const f = {
             bills: b.sales.length,
             items: itemsOf_(b.sales),
             new_customers: b.sales.filter((s) => isNewCustomer_(s, first)).length,
@@ -678,12 +698,65 @@ function monthFigures_(ctx, from, to) {
             gst: r2_(sumBy_(b.sales, (s) => s.cgst + s.sgst) - sumBy_(b.returns, "tax")),
             revenue: pr.revenue,
             cost: pr.cost,
-            // the month's leaderboard, kept short: [id, name, bills, items, new customers, sales, returns].
-            // Google reviews are not in it — they are counted fresh (one can be marked "Doesn't count" later)
-            people: leaderboard_(b.sales, b.returns, null, null, []).map((r) => [r.salesman_id, r.name, r.bills, r.items, r.new_customers, r.sales, r.returns]),
         };
-    });
+        // the month's leaderboard, kept short: [id, name, bills, items, new customers, sales, returns].
+        // Google reviews are not in it — they are counted fresh (one can be marked "Doesn't count" later)
+        if (withPeople)
+            f.people = leaderboard_(b.sales, b.returns, null, null, []).map((r) => [r.salesman_id, r.name, r.bills, r.items, r.new_customers, r.sales, r.returns]);
+        return f;
+    };
+    const out = { months: {}, days: {} };
+    Object.keys(months).forEach((m) => (out.months[m] = figures(months[m], true)));
+    Object.keys(days).forEach((d) => (out.days[d] = figures(days[d], false)));
     return out;
+}
+
+/* ---------- day by day (a range of 2–31 days) ---------- */
+
+const DAY_SPAN_ = 31;
+// a finished month's day figures, kept in the script cache for 6 hours: the month's total is kept (above),
+// its days are not, so they would otherwise be read again on every open of that month
+const DAY_CACHE_ = "dy1_";
+// Script Property: the cached days' generation, moved on by clearMonthTotals_ (Recalculate, Reset test
+// data), so a recalculated month never shows the day bars from before. Not under MONTH_KEEP_, so the
+// kept-months pruning never touches it
+const DAY_GEN_ = "dyg_";
+
+// every date from `from` to `to` ("yyyy-mm-dd"), both included
+function datesIn_(from, to) {
+    const out = [];
+    for (let t = Date.parse(from + "T00:00:00Z"); ; t += 86400000) {
+        const d = new Date(t).toISOString().slice(0, 10);
+        if (d > to) break;
+        out.push(d);
+    }
+    return out;
+}
+
+/**
+ * The days of a kept (whole, finished) month: from the script cache, or read once and cached for 6 hours.
+ * Such a month can't change through the app (see monthPieces_), so its days can be kept like its total.
+ */
+function keptMonthDays_(ctx, pc, gen) {
+    const key = DAY_CACHE_ + gen + "_" + (ctx.branch_id || 0) + "_" + pc.month;
+    let cache = null;
+    try {
+        cache = CacheService.getScriptCache();
+        const raw = cache.get(key);
+        if (raw) {
+            const v = JSON.parse(raw);
+            if (v && typeof v === "object" && Object.keys(v).every((d) => MONTH_FIELDS_.every((k) => typeof v[d][k] === "number"))) return v;
+        }
+    } catch (e) {
+        /* read again below */
+    }
+    const days = spanFigures_(ctx, pc.from, pc.to, true).days;
+    try {
+        if (cache) cache.put(key, JSON.stringify(days), 21600);
+    } catch (e) {
+        console.error("keptMonthDays_", e);
+    }
+    return days;
 }
 
 // the leaderboard for the whole range: each month's people added up (the latest month's name wins), then the
@@ -792,7 +865,12 @@ function reportPerformance_(p, ctx) {
     const kept = props.getProperties();
     const keyOf = (m) => MONTH_KEEP_ + (ctx.branch_id || 0) + "_" + m;
     const figures = readKeptMonths_(kept, keyOf, pieces);
-    // the rest, read in as few spans as possible (at most a cut month at each end around kept ones)
+    // a range of 2–31 days is shown day by day as well (This month, Last month, 1–31 March, a week…)
+    const dates = datesIn_(from, to);
+    const withDays = dates.length >= 2 && dates.length <= DAY_SPAN_;
+    const dayFigures = {};
+    // the rest, read in as few spans as possible (at most a cut month at each end around kept ones); the
+    // days of what is read come from the same read
     let run = null;
     const runs = [];
     pieces.forEach((pc) => {
@@ -800,22 +878,34 @@ function reportPerformance_(p, ctx) {
         if (run) run.to = pc.to;
         else runs.push((run = { from: pc.from, to: pc.to }));
     });
-    runs.forEach((r) => Object.assign(figures, monthFigures_(ctx, r.from, r.to)));
+    runs.forEach((r) => {
+        const f = spanFigures_(ctx, r.from, r.to, withDays);
+        Object.assign(figures, f.months);
+        Object.assign(dayFigures, f.days);
+    });
+    // a kept month's days: from the script cache, or one read of that month
+    if (withDays) pieces.filter((pc) => pc.kept).forEach((pc) => Object.assign(dayFigures, keptMonthDays_(ctx, pc, Number(kept[DAY_GEN_]) || 0)));
     // expenses: always fresh, a backdated or edited one shows at once
     const exp = {};
+    const expDay = {};
     rows_("Expenses").forEach((e) => {
         if (e.date < from || e.date > to || !inBranch_(ctx, e.branch_id)) return;
-        const m = String(e.date).slice(0, 7);
-        exp[m] = r2_((exp[m] || 0) + e.amount);
+        const d = String(e.date).slice(0, 10);
+        exp[d.slice(0, 7)] = r2_((exp[d.slice(0, 7)] || 0) + e.amount);
+        expDay[d] = r2_((expDay[d] || 0) + e.amount);
     });
     // counted Google reviews: always fresh too (the owner can say one doesn't count, months later)
     const reviews = reviewsIn_(ctx, from, to);
     const rv = {};
-    reviews.forEach((v) => {
-        const m = d10_(v.at).slice(0, 7);
-        const r = (rv[m] = rv[m] || { reviews: 0, samples: 0 });
+    const rvDay = {};
+    const tally = (store, k, v) => {
+        const r = (store[k] = store[k] || { reviews: 0, samples: 0 });
         r.reviews++;
         if (v.sample) r.samples++;
+    };
+    reviews.forEach((v) => {
+        tally(rv, d10_(v.at).slice(0, 7), v);
+        tally(rvDay, d10_(v.at), v);
     });
     const zero = { people: [] };
     MONTH_FIELDS_.forEach((k) => (zero[k] = 0));
@@ -828,7 +918,7 @@ function reportPerformance_(p, ctx) {
         return row;
     });
     keepMonths_(props, kept, toKeep);
-    return {
+    const out = {
         from, to,
         branch_name: ctx.branch_id ? branchName_(ctx.branch_id) : "All branches",
         months,
@@ -839,13 +929,28 @@ function reportPerformance_(p, ctx) {
         people: performancePeople_(pieces.map((pc) => (figures[pc.month] || zero).people), reviews),
         kept: pieces.filter((pc) => pc.kept).length,
     };
+    // every date in the range, with nothing on it shown as 0 — worked out like a month (performanceRow_)
+    if (withDays)
+        out.days = dates.map((date) => {
+            const row = Object.assign({ date }, performanceRow_(Object.assign({}, zero, dayFigures[date] || {}), expDay[date] || 0), rvDay[date] || { reviews: 0, samples: 0 });
+            delete row.people;
+            return row;
+        });
+    return out;
 }
 
 // every kept month total (Reset test data, the owner's Recalculate); the next Performance report works them out again
 function clearMonthTotals_() {
     const props = PropertiesService.getScriptProperties();
-    const keys = Object.keys(props.getProperties()).filter((k) => k.indexOf(MONTH_KEEP_) === 0);
+    const all = props.getProperties();
+    const keys = Object.keys(all).filter((k) => k.indexOf(MONTH_KEEP_) === 0);
     keys.forEach((k) => props.deleteProperty(k));
+    // the finished months' day bars in the script cache go with them: a new generation is never found there
+    try {
+        props.setProperty(DAY_GEN_, String((Number(all[DAY_GEN_]) || 0) + 1));
+    } catch (e) {
+        console.error("clearMonthTotals_ day generation", e);
+    }
     return keys.length;
 }
 

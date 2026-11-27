@@ -180,9 +180,10 @@ The app prints an **80 mm receipt** or an **A4 tax invoice** using the phone's o
     - **The totals:** Home's figures for those dates (net sales, profit, bills, average bill, returns, items sold, new customers, expenses, Google reviews and samples given).
     - **Salespeople leaderboard:** each person's bills, returns and net sales for those dates, with items, average bill, new customers, Google reviews and samples. It shows the same figures as **Reports → Salespeople**.
     - **Month by month:** pick a value to see each month with ▲/▼ against the month before. Tap a month for all its figures.
+    - **Day by day:** for any dates up to 31 days (This month, Last month, 1–31 March, or a week you pick, even across two months), a bar for every day instead, opening on Net sales; tap a bar for that day's figure. Daily **Profit** takes off that day's expenses, so the day rent is paid shows as a red bar. A finished month's days are read once and then kept for a few hours, so opening it again stays quick.
     - **How profit is worked out:** at the bottom, from sales down to profit.
     - **Why it stays quick:** finished months are worked out once and kept; expenses are always counted fresh.
-    - **Recalculate from the bills** (owner only): use it if the Google Sheet is ever edited by hand; it works the kept months out again.
+    - **Recalculate from the bills** (owner only): use it if the Google Sheet is ever edited by hand; it works the kept months (and their days) out again.
 - **End of day:** go to **More → Reports → Day close**. It shows the cash you should have in the drawer and a breakdown by salesperson.
 - **Cash at kiosk (owner; managers can look):** UPI and card go to the bank; cash waits in the drawer until you collect it. **More → Cash at kiosk** shows what should be in the branch's drawer now: what you left at your last count, plus cash sales, less cash refunds, voids and cash expenses since.
     - **Start:** count the drawer once (**Count the drawer**). The app counts on from that amount; nothing before it matters.

@@ -475,11 +475,17 @@ const rupees = (n) => inr(Math.round(n) + 0);
 function PerformanceReport({ d, reload, onMonth }) {
   const { isAdmin, toast } = useApp();
   const [pick, setPick] = useState("profit");
+  // day by day opens on Net sales: a day's profit takes off that day's expenses, so rent day is a big loss
+  const [dayPick, setDayPick] = useState("net");
   const [busy, setBusy] = useState(false);
   const t = d.totals;
   const months = d.months || [];
+  // a range of 2–31 days comes day by day as well (an older server sends none: month by month as before)
+  const days = d.days || [];
   const metric = PERF_VALUES.find((v) => v.value === pick);
   const show = (v) => (metric.money ? rupees(v) : count(v));
+  const dayMetric = PERF_VALUES.find((v) => v.value === dayPick);
+  const showDay = (v) => (dayMetric.money ? rupees(v) : count(v));
   const red = (v) => (Math.round(v) < 0 ? { color: "var(--bad)" } : undefined);
   const loss = Math.round(t.profit) < 0;
   // a month that isn't whole (this month so far, or cut by the dates picked) says which days it covers
@@ -528,7 +534,16 @@ function PerformanceReport({ d, reload, onMonth }) {
 
       {d.people && <BoardCard rows={d.people} />}
 
-      {months.length > 1 && (
+      {days.length > 1 && (
+        <div className="card mt">
+          <div className="card-title"><h3>Day by day</h3></div>
+          <Chips value={dayPick} onChange={setDayPick} options={PERF_VALUES} />
+          <DayBars key={d.from + d.to} days={days} pick={dayPick} show={showDay} />
+          <div className="tiny muted mt">Tap a bar to see the day.</div>
+        </div>
+      )}
+
+      {days.length <= 1 && months.length > 1 && (
         <div className="card mt">
           <div className="card-title"><h3>Month by month</h3></div>
           <Chips value={pick} onChange={setPick} options={PERF_VALUES} />
@@ -624,6 +639,59 @@ function MonthBars({ months, pick, show, daysOf }) {
         {months.map((m, i) => (
           <span key={m.month} style={{ flex: 1, textAlign: "center" }}>
             {months.length <= 12 || i % 3 === 0 ? fmtMonth(m.month).slice(0, 3) : ""}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// "2026-11-15" → "Sat, 15 Nov"
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const dayLabel = (date) => `${WEEKDAYS[new Date(date + "T00:00:00Z").getUTCDay()]}, ${fmtDate(date).replace(/ \d{4}$/, "")}`;
+
+// one bar per day for the chosen value, drawn like MonthBars; a day below 0 (a day's loss, an expense day)
+// hangs under the line, in red. The date numbers under it are thinned out to fit a phone
+function DayBars({ days, pick, show }) {
+  const [sel, setSel] = useState(days.length - 1);
+  const vals = days.map((x) => x[pick] || 0);
+  const hi = Math.max(0, ...vals);
+  const lo = Math.min(0, ...vals);
+  const span = hi - lo || 1;
+  const H = 50;
+  const zero = (hi / span) * H;
+  const w = 100 / days.length;
+  const cur = days[Math.min(sel, days.length - 1)];
+  const every = days.length > 16 ? 5 : days.length > 8 ? 2 : 1;
+  return (
+    <div className="mt">
+      <div className="row between small mb">
+        <span className="muted">{dayLabel(cur.date)}</span>
+        <b className="money" style={(cur[pick] || 0) < 0 ? { color: "var(--bad)" } : undefined}>{show(cur[pick])}</b>
+      </div>
+      <svg viewBox={`0 0 100 ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 130 }} role="img" aria-label="Day by day">
+        <line x1="0" x2="100" y1={zero} y2={zero} stroke="var(--line)" strokeWidth="0.4" />
+        {vals.map((v, i) => {
+          const h = Math.max((Math.abs(v) / span) * H, 0.4);
+          return (
+            <rect
+              key={days[i].date}
+              x={i * w + w * 0.15}
+              y={v < 0 ? zero : zero - h}
+              width={w * 0.7}
+              height={h}
+              rx={0.4}
+              fill={v < 0 ? "var(--bad)" : i === sel ? "var(--brown)" : "var(--gold)"}
+              onClick={() => setSel(i)}
+              style={{ cursor: "pointer" }}
+            />
+          );
+        })}
+      </svg>
+      <div className="row tiny muted">
+        {days.map((x, i) => (
+          <span key={x.date} style={{ flex: 1, textAlign: "center", whiteSpace: "nowrap" }}>
+            {i % every === 0 || (i === days.length - 1 && i % every >= 3) ? Number(x.date.slice(8)) : ""}
           </span>
         ))}
       </div>

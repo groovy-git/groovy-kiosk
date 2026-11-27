@@ -3158,6 +3158,72 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     check("...a store that can't take more doesn't stop the report; that month is simply not kept", full.success && full.data.months.length === 1 && !keys().includes("mt1_1_" + ymAgo(19)), full.message);
     check("...and it is kept on the next open", perf({ from: ymAgo(19) + "-01", to: X.monthEnd_(ymAgo(19)) }).success && keys().includes("mt1_1_" + ymAgo(19)));
 
+    // ---- day by day: a range of 2–31 days also comes day by day ----
+    const day = (d, date) => d.days.find((x) => x.date === date);
+    const near = (a, b) => Math.abs(a - b) < 0.005;
+    const SUMMED = ["bills", "items", "new_customers", "sales", "returns", "net", "gst", "revenue", "cost", "expenses", "profit", "reviews", "samples"];
+    const addsUp = (d) => SUMMED.every((k) => near(d.days.reduce((a, x) => a + x[k], 0), d.totals[k]));
+    // count the reads of the bills, to see a finished month's days come from the cache the second time
+    const realWindow = X.windowRows_;
+    let salesReads = 0;
+    X.windowRows_ = function (name, ...a) {
+        if (name === "Sales") salesReads++;
+        return realWindow.call(this, name, ...a);
+    };
+    const reads = (fn) => {
+        const was = salesReads;
+        const out = fn();
+        return { out, reads: salesReads - was };
+    };
+    const M1END = X.monthEnd_(M1);
+    [...fEnv.cache.keys()].filter((k) => k.indexOf("dy1_") === 0).forEach((k) => fEnv.cache.delete(k));
+    const firstOpen = reads(() => perf({ from: M1 + "-01", to: M1END }).data);
+    const lastM = firstOpen.out;
+    check("day by day: last month (a kept month) comes with one row per date, in order",
+        lastM.kept === 1 && lastM.days && lastM.days.length === Number(M1END.slice(8)) && lastM.days[0].date === M1 + "-01" && lastM.days.every((x, i, a) => !i || x.date > a[i - 1].date),
+        { kept: lastM.kept, n: lastM.days && lastM.days.length });
+    check("...the 5th: the return; the 8th: the returning customer's bill, not new; the 12th: this branch's bill, a new customer",
+        day(lastM, M1 + "-05").returns === 1180 && day(lastM, M1 + "-05").bills === 0 && day(lastM, M1 + "-08").bills === 1 && day(lastM, M1 + "-08").new_customers === 0 &&
+            day(lastM, M1 + "-12").bills === 1 && day(lastM, M1 + "-12").new_customers === 1 && day(lastM, M1 + "-12").revenue === 1000 && day(lastM, M1 + "-12").cost === 400,
+        [day(lastM, M1 + "-05"), day(lastM, M1 + "-08"), day(lastM, M1 + "-12")]);
+    check("...the 15th: the salary as that day's expense, a loss that day", day(lastM, M1 + "-15").expenses === 200 && day(lastM, M1 + "-15").profit === -200, day(lastM, M1 + "-15"));
+    check("...a day with nothing on it: all zeros, and no leaderboard in a day", ["bills", "net", "profit", "expenses", "reviews"].every((k) => day(lastM, M1 + "-02")[k] === 0) && lastM.days.every((x) => !("people" in x)));
+    check("...the days add up to the totals at the top", addsUp(lastM), SUMMED.map((k) => [k, lastM.days.reduce((a, x) => a + x[k], 0), lastM.totals[k]]));
+    check("...the first open reads the month's bills once (its total was kept, its days not yet)", firstOpen.reads === 1, firstOpen.reads);
+    const secondOpen = reads(() => perf({ from: M1 + "-01", to: M1END }).data);
+    check("...opened again: the days come from the cache — no read of the bills, the same answer", secondOpen.reads === 0 && JSON.stringify(secondOpen.out) === JSON.stringify(lastM), secondOpen.reads);
+    const cutM = perf({ from: M1 + "-01", to: M1 + "-28" }).data;
+    check("...and they are the very days a cut range (read from the bills) gives", cutM.kept === 0 && cutM.days.every((x) => JSON.stringify(x) === JSON.stringify(day(lastM, x.date))));
+    // a hand edit of the Sheet moves last month's bill from the 12th to the 13th: the cache holds the old days until
+    // the owner's Recalculate, which also lets the cached days go
+    move("Sales", "date", kc2.sale.id, M1 + "-13 11:00:00");
+    check("day by day, a hand edit: not seen until worked out again (like the month's total)", day(perf({ from: M1 + "-01", to: M1END }).data, M1 + "-12").bills === 1);
+    const redo = perf({ from: M1 + "-01", to: M1END, recalc: 1 }).data;
+    check("...the owner's Recalculate shows it on the 13th", day(redo, M1 + "-12").bills === 0 && day(redo, M1 + "-13").bills === 1, [day(redo, M1 + "-12").bills, day(redo, M1 + "-13").bills]);
+    const afterRedo = reads(() => perf({ from: M1 + "-01", to: M1END }).data);
+    check("...and the next open (kept again) reads the bills once and shows the 13th too — the old cached days are never used again",
+        afterRedo.out.kept === 1 && afterRedo.reads === 1 && day(afterRedo.out, M1 + "-13").bills === 1 && day(afterRedo.out, M1 + "-12").bills === 0, afterRedo.reads);
+    move("Sales", "date", kc2.sale.id, M1 + "-12 11:00:00");
+    perf({ from: from3, to: T0, recalc: 1 });
+
+    // this month, ranges across months, the edges of 2 and 31 days
+    const nNow = Number(T0.slice(8));
+    const thisM = perf({ from: M0 + "-01", to: T0 }).data;
+    check("day by day: this month, a row per day so far (none on the 1st: one day only)", nNow >= 2 ? thisM.days.length === nNow && day(thisM, T0).bills === 1 && addsUp(thisM) : !thisM.days, thisM.days && thisM.days.length);
+    const r31 = perf({ from: M2 + "-20", to: X.datesIn_(M2 + "-20", M1 + "-28")[30] }).data;
+    check("...31 days across two months: day by day, the late salary on its day, adding up", r31.days.length === 31 && day(r31, M2 + "-20").expenses === 100 && r31.months.length === 2 && addsUp(r31), r31.days.length);
+    const d32 = X.datesIn_(M2 + "-01", M1 + "-28")[31];
+    check("...32 days: month by month only", !perf({ from: M2 + "-01", to: d32 }).data.days);
+    check("...one day: no day bars", !perf({ from: T0, to: T0 }).data.days);
+    check("...two days: day by day", perf({ from: M1 + "-11", to: M1 + "-12" }).data.days.length === 2);
+    check("...three months: month by month only, as before", !perf({ from: from3, to: T0 }).data.days);
+    // branch views keep their own cached days
+    const allM = perf({ from: M1 + "-01", to: M1END }, FT, 0).data;
+    const b2M = perf({ from: M1 + "-01", to: M1END }, FT, B2).data;
+    check("day by day, All branches: the 12th has both branches' bills; the other branch alone has its one", day(allM, M1 + "-12").bills === 2 && day(b2M, M1 + "-12").bills === 1 && day(perf({ from: M1 + "-01", to: M1END }).data, M1 + "-12").bills === 1);
+    check("...a manager gets the days too", day(perf({ from: M1 + "-01", to: M1END }, FM).data, M1 + "-12").bills === 1);
+    X.windowRows_ = realWindow;
+
     X.resetReqCache_();
     const reset = X.resetTestData_();
     check("Reset test data clears the kept months", keys().length === 0 && reset.month_totals > 0, reset.month_totals);
