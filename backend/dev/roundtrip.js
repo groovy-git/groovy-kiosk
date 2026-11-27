@@ -189,6 +189,32 @@ const lib = (f) => import(pathToFileURL(path.join(__dirname, "..", "..", "fronte
         dL.updated === 2 && dL.unchanged === rrows.length - 2 && dL.errors.length === 0 && catL2.byBarcode.get("6291108735411").max === 12 && plainL.reorder === 5 && plainL.max === 20, dL);
     check("...numbers typed into the info_ columns (stock, to fill) change nothing", catL2.byBarcode.get("6291108735411").stock === 1 && plainL.stock === 0);
 
+    // ---- the out-of-stock list (Stock → Out of stock → Download out-of-stock list): the same file again ----
+    const scentId = catL2.items.find((i) => i.name === "Scent of Love Eau de Parfum").id;
+    oc("adjustStock", { variant_id: scentId, mode: "set", qty: 0 }); // none left, no Fill up to set
+    const catO = catalogNow();
+    const outItems = catO.items.filter((i) => i.active && i.here && i.stock <= 0); // the Out of stock pill's rule
+    const ocsv = refillListCSV(catO, outItems, branches, here);
+    check("out-of-stock list: the very same columns as the refill list", ocsv.split("\n")[0] === rHead, ocsv.split("\n")[0]);
+    const orows = parseCSV(ocsv);
+    const oPlain = orows.find((r) => r.product === "Plain No Codes");
+    const oScent = orows.find((r) => r.product === "Scent of Love Eau de Parfum");
+    check("...only the sizes with none left (not the low ones that still have some)", orows.length === outItems.length && oPlain && oScent && !orows.some((r) => r.barcode === "6291108735411"), orows.map((r) => r.product));
+    check("...how many to put back: the whole Fill up to (20), blank where none is set", oPlain[fillKey] === "20" && oScent[fillKey] === "", [oPlain[fillKey], oScent[fillKey]]);
+    const chkO = checkImport(withoutInfoColumns(orows), catO);
+    check("...the check before saving: every row matches, none new", chkO.matched === orows.length && chkO.fresh.length === 0 && chkO.damaged.length === 0, chkO);
+    const dO0 = send(orows)[0].data;
+    check("...uploaded untouched: every row unchanged, none skipped", dO0.unchanged === orows.length && dO0.updated === 0 && dO0.errors.length === 0, dO0);
+    const oedit = parseCSV(ocsv);
+    oedit.find((r) => r.product === "Scent of Love Eau de Parfum").sell_price = "739";
+    oedit.find((r) => r.product === "Plain No Codes").reorder_level = "4";
+    const dO = send(oedit)[0].data;
+    const catO2 = catalogNow();
+    const scent2 = catO2.byVariant.get(scentId);
+    const plain2 = catO2.items.find((i) => i.name === "Plain No Codes");
+    check("...edited (a price, a low alert): exactly those 2 change", dO.updated === 2 && dO.unchanged === orows.length - 2 && dO.errors.length === 0 && scent2.price === 739 && plain2.reorder === 4 && plain2.max === 20, dO);
+    check("...and stock stays as it was (none left)", scent2.stock === 0 && plain2.stock === 0);
+
     // ---- the check before saving: what it is there to catch ----
     const renamed = parseCSV(csv2);
     renamed.find((r) => r.product === "Plain No Codes").product = "Plain Renamed";

@@ -26,6 +26,10 @@ const PILL = {
   hidden: (i) => !i.active,
 };
 
+// the pills whose list can be downloaded (owner, managers, stock movers): the same file as "Export all
+// products" for just those items, plus how many to put back — Import takes it back
+const LIST_FILE = { low: { file: "refill", name: "Refill list" }, out: { file: "out-of-stock", name: "Out-of-stock list" } };
+
 export default function Stock({ tab }) {
   const { isManager, isMover, canTransfer, multiBranch } = useApp();
   // a stock mover has the product list and the transfers, never what was bought in (it shows cost)
@@ -79,13 +83,14 @@ function Products() {
   // a new search or pill starts from the top again
   useEffect(() => setShown(PAGE), [query, filter]);
 
-  // every low item on the screen (not only the ones scrolled to), in the "Export all products" columns
-  // so the file can be edited and imported back, plus how many to put back
-  const downloadRefill = () => {
+  // every item on the Low stock or Out of stock list on the screen (not only the ones scrolled to), in the
+  // "Export all products" columns so the file can be edited and imported back, plus how many to put back
+  const listFile = LIST_FILE[filter] || null;
+  const downloadList = () => {
     const b = branches.find((x) => x.id === branchId);
     const slug = b ? b.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") : "";
-    downloadText(`refill-${slug ? slug + "-" : ""}${istDate()}.csv`, refillListCSV(catalog, list, branches, b));
-    toast(`Refill list: ${plural("item", list.length)}`, "success");
+    downloadText(`${listFile.file}-${slug ? slug + "-" : ""}${istDate()}.csv`, refillListCSV(catalog, list, branches, b));
+    toast(`${listFile.name}: ${plural("item", list.length)}`, "success");
   };
   const more = useMoreOnScroll(shown < list.length, () => setShown((n) => n + PAGE));
 
@@ -128,9 +133,9 @@ function Products() {
         />
       </div>
       {/* for whoever brings stock in or across (a salesperson is not sent "Fill up to" at all) */}
-      {filter === "low" && list.length > 0 && (isManager || isMover) && (
-        <button className="btn secondary block mt" onClick={downloadRefill} disabled={!shelf}>
-          <Download size={18} /> {shelf ? `Download refill list (${list.length})` : "Refill list: choose a branch first"}
+      {listFile && list.length > 0 && (isManager || isMover) && (
+        <button className="btn secondary block mt" onClick={downloadList} disabled={!shelf}>
+          <Download size={18} /> {shelf ? `Download ${listFile.name.toLowerCase()} (${list.length})` : `${listFile.name}: choose a branch first`}
         </button>
       )}
       {isManager && (
@@ -513,7 +518,7 @@ function ImportSheet({ open, onClose }) {
         branch names with ; between them; the export leaves it blank for a size sold everywhere, and “all” puts one back to every branch). It cannot rename a product, brand or size, change a barcode or SKU that is already set, hide
         or delete a product, or change stock; the columns starting with “info_” are only for reading.
         <br />
-        The refill list (Low stock → Download refill list) is the same file for just the low and out-of-stock items: change reorder_level or max_level (Fill up to)
+        The refill list (Low stock → Download refill list) and the out-of-stock list (Out of stock → Download out-of-stock list) are the same file for just those items: change reorder_level or max_level (Fill up to)
         there and choose it here the same way.
       </p>
       <button className="btn secondary block" onClick={exportAll} disabled={!catalog.items.length}>
