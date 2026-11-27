@@ -6,7 +6,7 @@ import CameraScanner from "../components/CameraScanner";
 import { Chips, Empty, LazyImg, SearchBar } from "../components/ui";
 import { NeedBranch } from "../components/Branch";
 import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
-import { searchItems, lookupBarcode, imageUrl } from "../lib/catalog";
+import { searchItems, lookupBarcode, imageUrl, notSoldText } from "../lib/catalog";
 import { PAGE, MIN_SEARCH, useSearchQuery, useMoreOnScroll } from "../lib/listing";
 import { addLine, computeBill, offerFill, liveOffers, qtyInCart } from "../lib/cart";
 import { beepError, beepOk, unlockAudio } from "../lib/feedback";
@@ -19,7 +19,7 @@ import HeldSheet from "./sell/HeldSheet";
 import ReviewSheet from "./sell/ReviewSheet";
 
 export default function Sell() {
-  const { catalog, cart, setCart, settings, toast, isAllBranches, role } = useApp();
+  const { catalog, cart, setCart, settings, toast, isAllBranches, role, branch } = useApp();
   const today = istDate(); // offers run by date: an app left open past midnight works out the next day's
   const [q, setQ] = useState("");
   const query = useSearchQuery(q);
@@ -33,7 +33,9 @@ export default function Sell() {
   const searchRef = useRef(null);
   const allowNeg = settings.allow_negative_stock === "yes";
 
-  const sellable = useMemo(() => catalog.items.filter((i) => i.active), [catalog]);
+  // "Sold at": what this branch sells, plus what it still has of a size it no longer sells (until gone)
+  const sellable = useMemo(() => catalog.items.filter((i) => i.active && i.shown), [catalog]);
+  const notHere = (item) => notSoldText(item, branch ? branch.name : "this branch", false);
   const catOptions = useMemo(() => {
     const used = new Set(sellable.map((i) => i.category_id));
     return [{ value: "all", label: "All" }, ...catalog.categories.filter((c) => used.has(c.id)).map((c) => ({ value: c.id, label: c.name }))];
@@ -53,8 +55,10 @@ export default function Sell() {
   // add qty (merges with an existing line); returns {ok,label} for scan feedback
   const addQty = (item, qty) => {
     if (!item.active) return { ok: false, label: `${item.name} is not for sale` };
+    if (!item.shown) return { ok: false, label: notHere(item) };
     const inCart = qtyInCart(cart.lines, item.id);
-    if (!allowNeg && inCart + qty > item.stock) {
+    // a size this branch no longer sells: only what is left, whatever the negative-stock setting says
+    if ((!allowNeg || !item.here) && inCart + qty > item.stock) {
       return { ok: false, label: item.stock <= 0 ? `${item.name} ${item.size} is out of stock` : `Only ${item.stock} of ${item.name} ${item.size} in stock` };
     }
     setCart((c) => ({ ...c, lines: addLine(c.lines, item.id, qty) }));
@@ -65,6 +69,7 @@ export default function Sell() {
   const addItem = (item) => {
     if (item.loose) {
       if (!item.active) return { ok: false, label: `${item.name} is not for sale` };
+      if (!item.shown) return { ok: false, label: notHere(item) };
       setLoose(item);
       return { ok: true, label: `${item.name} — choose ml` };
     }

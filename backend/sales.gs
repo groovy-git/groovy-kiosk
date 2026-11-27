@@ -91,7 +91,13 @@ function completeSaleLocked_(p, ctx, clientRef, lines, branch, opts) {
         if (l.qty <= 0) fail_("Quantity must be above 0 for " + label);
         if (v.unit === "pcs" && Math.floor(l.qty) !== l.qty) fail_("Quantity must be a whole number for " + label);
         const have = r3_(stockOf_(v.id, branch) + ((opts && opts.extraStock && opts.extraStock[v.id]) || 0));
-        if (!allowNeg && l.qty > have) fail_("Only " + have + " " + (v.unit === "ml" ? "ml" : "pcs") + " of " + label + " in stock at " + branchName_(branch));
+        // a branch that doesn't sell the size ("Sold at") may only sell off what it still has, whatever the
+        // negative-stock setting says
+        const sold = soldAt_(v, branch);
+        if (l.qty > have && (!allowNeg || !sold)) {
+            if (!sold && have <= 0) fail_(label + " is not sold at " + branchName_(branch));
+            fail_("Only " + have + " " + (v.unit === "ml" ? "ml" : "pcs") + " of " + label + " in stock at " + branchName_(branch));
+        }
         return {
             variant_id: v.id, qty: l.qty, discount: l.discount, price: v.sell_price, gst_rate: gstOff ? 0 : prod.gst_rate,
             _v: v, _prod: prod, _brand: bmap[prod.brand_id] ? bmap[prod.brand_id].name : "",

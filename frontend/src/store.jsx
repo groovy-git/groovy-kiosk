@@ -341,7 +341,7 @@ export function AppProvider({ children }) {
     rawCatalogRef.current = rawCatalog; // read by bootstrap, which runs outside render
   }, [rawCatalog]);
 
-  const catalog = useMemo(() => buildCatalog(rawCatalog), [rawCatalog]);
+  const catalog = useMemo(() => buildCatalog(rawCatalog, branches.length), [rawCatalog, branches.length]);
 
   // patch stock locally after a sale / stock-in so the UI is instant; server version refresh follows
   const patchStock = useCallback((changes) => {

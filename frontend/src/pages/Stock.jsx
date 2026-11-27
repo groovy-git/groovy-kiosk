@@ -5,7 +5,7 @@ import { api } from "../lib/api";
 import { useCachedFetch } from "../lib/cached";
 import { runBusy } from "../lib/busy";
 import { navigate, useRoute } from "../lib/router";
-import { searchItems, lookupBarcode, isLow, fillQty } from "../lib/catalog";
+import { searchItems, lookupBarcode, isLow, fillQty, soldAt } from "../lib/catalog";
 import { PAGE, MIN_SEARCH, useSearchQuery, useMoreOnScroll } from "../lib/listing";
 import { inr, fmtDateTime, qtyLabel, r3, plural, istDate } from "../lib/format";
 import { beepError, beepOk } from "../lib/feedback";
@@ -56,12 +56,16 @@ function Products() {
   const [importOpen, setImportOpen] = useState(false);
   const [confirm, confirmNode] = useConfirm();
 
+  // "Sold at": low and out are only what this branch sells; a size it doesn't sell is listed while some
+  // are left (shown), and the owner and managers find all of them under "Not sold here" to change it
+  const notSoldCount = useMemo(() => catalog.items.filter((i) => i.active && !i.here).length, [catalog]);
   const list = useMemo(() => {
     let l = catalog.items;
-    if (filter === "low") l = l.filter((i) => i.active && isLow(i));
-    else if (filter === "out") l = l.filter((i) => i.active && i.stock <= 0);
+    if (filter === "low") l = l.filter((i) => i.active && i.here && isLow(i));
+    else if (filter === "out") l = l.filter((i) => i.active && i.here && i.stock <= 0);
     else if (filter === "hidden") l = l.filter((i) => !i.active);
-    else l = l.filter((i) => i.active);
+    else if (filter === "notsold") l = l.filter((i) => i.active && !i.here);
+    else l = l.filter((i) => i.active && i.shown);
     return searchItems(l, query);
   }, [catalog, query, filter]);
 
@@ -108,9 +112,10 @@ function Products() {
           value={filter}
           onChange={setFilter}
           options={[
-            { value: "all", label: `All (${catalog.items.filter((i) => i.active).length})` },
+            { value: "all", label: `All (${catalog.items.filter((i) => i.active && i.shown).length})` },
             { value: "low", label: "Low stock" },
             { value: "out", label: "Out of stock" },
+            ...(isManager && (notSoldCount > 0 || filter === "notsold") ? [{ value: "notsold", label: `Not sold here (${notSoldCount})` }] : []),
             ...(isManager ? [{ value: "hidden", label: "Hidden" }] : []),
           ]}
         />
@@ -195,12 +200,17 @@ function ItemSheet({ item, onClose }) {
 
   if (!item) return null;
   const shelf = !multiBranch || !!branchId;
-  // "Kalyani Nagar 3 (fill 27)": each branch is its own shelf, so this also works from "All branches"
+  // "Kalyani Nagar 3 (fill 27)": each branch is its own shelf, so this also works from "All branches".
+  // A branch that doesn't sell the size: "not sold", or what it has left (nothing to fill there)
+  const sells = (b) => soldAt(live, b.id, branches.length);
   const atBranch = (b) => {
     const q = live.stockBy[b.id] || 0;
+    if (!sells(b)) return q > 0 ? `${b.name} ${qtyLabel(q, live.unit)} (not sold)` : `${b.name} not sold`;
     const f = fillQty(live, q);
     return `${b.name} ${qtyLabel(q, live.unit)}${f ? ` (fill ${qtyLabel(f, live.unit)})` : ""}`;
   };
+  // "Sold at", when it isn't every branch
+  const soldNames = multiBranch && live.soldAt.length ? branches.filter(sells).map((b) => b.name) : null;
   const loadMoves = async () => {
     setMoves("loading");
     try {
@@ -234,6 +244,12 @@ function ItemSheet({ item, onClose }) {
                 .map(atBranch)
                 .join(" · ")}
             </span>
+          </div>
+        )}
+        {soldNames && (
+          <div className="kv">
+            <span className="k">Sold at</span>
+            <b className="right">{soldNames.length === 1 ? `${soldNames[0]} only` : soldNames.join(", ") || "No open branch"}</b>
           </div>
         )}
         {(isManager || isMover) && (live.reorder > 0 || live.max > 0) && (
@@ -486,7 +502,8 @@ function ImportSheet({ open, onClose }) {
         warns when stock runs low. Anything already saved here — a barcode, a reorder level you set — is never replaced.
         <br />
         To change many products at once: export all products, change prices or details in Excel or Google Sheets, save as CSV and choose that file here. A file can change
-        prices, MRP, cost, reorder level, Fill up to (max_level), category, gender, HSN, GST and image. It cannot rename a product, brand or size, change a barcode or SKU that is already set, hide
+        prices, MRP, cost, reorder level, Fill up to (max_level), category, gender, HSN, GST, image and, with more than one branch, which branches sell each size (sold_at:
+        branch names with ; between them; the export leaves it blank for a size sold everywhere, and “all” puts one back to every branch). It cannot rename a product, brand or size, change a barcode or SKU that is already set, hide
         or delete a product, or change stock; the columns starting with “info_” are only for reading.
         <br />
         The refill list (Low stock → Download refill list) is the same file for just the low and out-of-stock items: change reorder_level or max_level (Fill up to)

@@ -88,6 +88,10 @@ const SCHEMA = {
         // "Fill up to": the full-shelf count. When stock is low, the app says how many to put back
         // (max_level − stock). One number for every branch, like reorder_level. 0 = not set.
         max_level: "n",
+        // "Sold at": the branches that sell this size, as a comma list of branch ids. Blank = every branch
+        // (every branch ticked is stored blank too, so a branch opened later sells it). Where it isn't sold,
+        // the size is shown only while that branch still has some left (see soldAt_ in branches.gs).
+        sold_at: "s",
     },
     Stock_Movements: {
         id: "n",

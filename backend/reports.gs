@@ -176,7 +176,8 @@ function apiDashboard_(p, ctx) {
         const prod = pmap[v.product_id];
         if (!v.active || !prod || !prod.active) return;
         const q = branchStock[v.id] || 0;
-        if (isLow_(v, q)) {
+        // low only where the size is sold: a branch selling off what it has left is not told to refill it
+        if (soldAt_(v, ctx.branch_id) && isLow_(v, q)) {
             const row = { variant_id: v.id, name: prod.name, size: v.size_label, unit: v.unit, stock_qty: q, reorder_level: v.reorder_level };
             if (withFill) row.max_level = v.max_level;
             if (shelf) row.fill = fillQty_(v, q);
@@ -340,10 +341,12 @@ function daySoldItems_(daySales, branchId, withFill) {
             const v = vmap[a.variant_id];
             a.stock_left = stock[a.variant_id] || 0;
             a.reorder_level = v ? v.reorder_level : 0;
-            a.refill = v ? isLow_(v, a.stock_left) : false;
+            // a branch that no longer sells the size ("Sold at") is selling off what was left: nothing to refill
+            const sold = !!v && soldAt_(v, branchId || 0);
+            a.refill = sold ? isLow_(v, a.stock_left) : false;
             if (withFill) {
                 a.max_level = v ? v.max_level : 0;
-                a.fill = v && shelf ? fillQty_(v, a.stock_left) : 0;
+                a.fill = sold && shelf ? fillQty_(v, a.stock_left) : 0;
             }
             return a;
         })
@@ -856,6 +859,8 @@ function reportStock_(p, ctx) {
     rows_("Variants").forEach((v) => {
         const prod = pmap[v.product_id];
         if (!prod || !v.active) return;
+        // a size this branch doesn't sell is listed only while some is left there (it is still worth money)
+        if (!soldAt_(v, ctx.branch_id) && !((branchStock[v.id] || 0) > 0)) return;
         const cat = cmap[prod.category_id] ? cmap[prod.category_id].name : "—";
         const qty = Math.max(0, branchStock[v.id] || 0);
         const cost = r2_(qty * v.avg_cost);

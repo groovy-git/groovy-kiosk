@@ -4,7 +4,7 @@ import { useApp } from "../store";
 import { api } from "../lib/api";
 import { runBusy } from "../lib/busy";
 import { navigate } from "../lib/router";
-import { searchItems, lookupBarcode, STOCKIN_PENDING as PENDING } from "../lib/catalog";
+import { searchItems, lookupBarcode, notSoldText, STOCKIN_PENDING as PENDING } from "../lib/catalog";
 import { inr, r2, r3, qtyLabel } from "../lib/format";
 import { beepError, beepOk, unlockAudio } from "../lib/feedback";
 import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
@@ -60,6 +60,11 @@ export default function StockIn() {
     const it = lookupBarcode(catalog, code);
     if (it) {
       sessionStorage.removeItem(PENDING);
+      // "Sold at": only a branch that sells the size takes it in
+      if (!it.here) {
+        toast(notSoldText(it, branch ? branch.name : "this branch"), "error", 4500);
+        return;
+      }
       const loose = it.unit === "ml";
       add(it, loose ? 0 : 1);
       toast(loose ? `${it.name} added to the list — enter the ml, then tap Save stock in` : `${it.name} ${it.size} added to the list — tap Save stock in to update stock`, "success", 3500);
@@ -80,6 +85,7 @@ export default function StockIn() {
       unknown(code);
       return { ok: false, label: `Unknown barcode ${code}` };
     }
+    if (!it.here) return { ok: false, label: notSoldText(it, branch ? branch.name : "this branch"), notSold: true };
     return add(it, it.unit === "ml" ? 0 : 1);
   };
 
@@ -89,16 +95,23 @@ export default function StockIn() {
     if (r.ok) {
       beepOk();
       toast(r.label, "success", 1200);
-    } else beepError();
+    } else {
+      beepError();
+      if (r.notSold) toast(r.label, "error", 4500);
+    }
   }, !scan);
 
-  const results = useMemo(() => (q.trim() ? searchItems(catalog.items, q).slice(0, 12) : []), [q, catalog]);
+  // only what this branch sells can be taken in here ("Sold at")
+  const results = useMemo(() => (q.trim() ? searchItems(catalog.items.filter((i) => i.here), q).slice(0, 12) : []), [q, catalog]);
   const lines = draft.lines.map((l) => ({ ...l, item: catalog.byVariant.get(l.variant_id) })).filter((l) => l.item);
   const units = r3(lines.reduce((s, l) => s + (Number(l.qty) || 0), 0));
   const cost = r2(lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.unit_cost) || 0), 0));
 
   const save = async () => {
     if (lines.some((l) => !(Number(l.qty) > 0))) return toast("Every item needs a quantity above 0", "error");
+    // a list started before a size stopped being sold here
+    const notHere = lines.find((l) => !l.item.here);
+    if (notHere) return toast(notSoldText(notHere.item, branch ? branch.name : "this branch") + " Or remove it from this list.", "error", 5000);
     setBusy(true);
     try {
       const r = await runBusy("Saving stock in…", () => api("stockIn", {
@@ -198,6 +211,12 @@ export default function StockIn() {
                     <div className="sub">
                       {l.item.size} · now {qtyLabel(l.item.stock, l.item.unit)}
                     </div>
+                    {/* a list started before this size stopped being sold here ("Sold at") */}
+                    {!l.item.here && (
+                      <div className="small bad-text bold">
+                        Not sold at {branch ? branch.name : "this branch"} — remove it, or tick {branch ? branch.name : "this branch"} in the product
+                      </div>
+                    )}
                   </div>
                   <button className="icon-btn" onClick={() => setDraft((d) => ({ ...d, lines: d.lines.filter((x) => x.variant_id !== l.variant_id) }))} aria-label="Remove">
                     <Trash2 size={18} />

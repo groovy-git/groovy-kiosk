@@ -41,9 +41,18 @@ function apiStockIn_(p, ctx) {
         const costed = [];
         let totalQty = 0;
         let totalCost = 0;
+        // every line is checked before anything is worked out or written
         lines.forEach((m) => {
             const v = vmap[m.variant_id];
             if (!v) fail_("Item not found (id " + m.variant_id + ")");
+            // only a branch that sells the size takes it in (the product's name is read only to say so)
+            assertSoldAt_(v, branch, () => {
+                const prod = findBy_("Products", "id", v.product_id);
+                return (prod ? prod.name + " " : "") + v.size_label;
+            });
+        });
+        lines.forEach((m) => {
+            const v = vmap[m.variant_id];
             const unitCost = m.cost_qty > 0 ? r2_(m.cost_total / m.cost_qty) : v.avg_cost;
             const oldQty = Math.max(0, v.stock_qty); // all branches
             if (m.cost_qty > 0) v.avg_cost = oldQty + m.qty > 0 ? r2_((oldQty * v.avg_cost + m.qty * unitCost) / (oldQty + m.qty)) : unitCost;
@@ -140,6 +149,8 @@ function apiTransferStock_(p, ctx) {
             if (v.unit === "pcs" && Math.floor(m.qty) !== m.qty) fail_("Quantity must be a whole number for " + label);
             const have = stockOf_(v.id, from);
             if (m.qty > have) fail_("Only " + have + (v.unit === "ml" ? " ml" : "") + " of " + label + " at " + branchName_(from));
+            // sent only to a branch that sells it; out of one that doesn't, always (that is how leftovers go back)
+            assertSoldAt_(v, to, label);
         });
         const bal = addStock_(
             lines.reduce(

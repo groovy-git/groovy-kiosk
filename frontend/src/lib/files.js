@@ -155,6 +155,11 @@ function exportColumns(catalog, branches) {
     { label: "hsn", get: (it) => excelText(it.hsn) },
     { label: "gst_rate", key: "gst" },
     { label: "image", get: (it) => it.image || "" },
+    // "Sold at", with two or more branches: the names of the branches that sell the size, blank = every
+    // branch. Import reads the names back (";" or "," between them, "all" for every branch).
+    ...(branches.length > 1
+      ? [{ label: "sold_at", get: (it) => branches.filter((b) => it.soldAt.includes(b.id)).map((b) => b.name).join("; ") }]
+      : []),
     { label: "info_hidden", get: (it) => (it.active ? "" : "yes") },
     ...(branches.length
       ? branches.map((b) => ({ label: "info_stock_" + b.name, get: (it) => it.stockBy[b.id] || 0 }))

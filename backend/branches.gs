@@ -169,6 +169,43 @@ function addStock_(changes) {
     return result;
 }
 
+/* ---------- which branches sell a size ("Sold at") — mirrored by soldAt in the app's lib/catalog.js ---------- */
+
+// Does this branch sell the size? Blank = every branch. "All branches" (0) is every shop, so yes. With
+// one branch open the shop is one shop again and sells everything (the form shows no ticks then, so a
+// size left to a closed branch could not be put back) — asked only of a size not listed for the branch.
+function soldAt_(v, branchId) {
+    const list = parseIdList_(v && v.sold_at);
+    if (!list.length || !num_(branchId) || list.indexOf(Number(branchId)) >= 0) return true;
+    return activeBranches_().length <= 1;
+}
+
+// Bringing stock into a branch that doesn't sell the size (Stock In, a transfer to it, opening stock)
+// is refused: the owner or a manager ticks the branch in the product first. `label` is the size's name,
+// or a function giving it — only worked out when refusing, so a request that passes reads nothing more.
+function assertSoldAt_(v, branchId, label) {
+    if (soldAt_(v, branchId)) return;
+    const name = branchName_(branchId);
+    fail_((typeof label === "function" ? label() : label) + " is not sold at " + name + ". Tick " + name + " for it in the product first.");
+}
+
+/**
+ * The "Sold at" ticks for one size → what is stored. `ids`: branch ids, as a list or "1,2".
+ * Every open branch ticked is stored blank — "every branch" — so a branch opened later sells it too.
+ * Closed branches are left out (the form shows only open ones). At least one must be ticked: a size
+ * sold nowhere is a hidden one, and hiding is what the eye icon is for.
+ */
+function cleanSoldAt_(ids, label) {
+    const list = parseIdList_(ids);
+    list.forEach((id) => {
+        if (!branchById_(id)) fail_("Unknown branch (id " + id + ") in Sold at for " + label);
+    });
+    const open = activeBranches_().map((b) => b.id);
+    const ticked = open.filter((id) => list.indexOf(id) >= 0);
+    if (!ticked.length) fail_("Tick at least one branch that sells " + label + ". To stop selling it everywhere, hide it instead.");
+    return ticked.length === open.length ? "" : ticked.join(",");
+}
+
 /* ---------- invoice series per branch ---------- */
 
 function branchCode_(branchId) {

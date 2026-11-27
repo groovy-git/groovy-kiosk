@@ -29,6 +29,24 @@ vm_run(`(function () {
     appendRows_("Users", [{ id: nextId_("Users"), name: "Weak Wasim", email: "weak@demo.local", phone: "", role: "salesperson", pwd_hash: hashPwd_("groovy@1234", salt), salt, active: 1, otp: "", otp_exp: "", created_at: now, updated_at: now, branch_id: 1, branch_ids: "" }]);
 })()`);
 
+// "Sold at" to try out: the incense sticks are sold only at Kondhwa (Kalyani Nagar's share goes back), and
+// Kalyani Nagar stops selling the 12ml bottle while it still has some — they stay on sale there until gone
+vm_run(`(function () {
+    resetReqCache_();
+    const owner = rows_("Users")[0];
+    const kn = findBy_("Branches", "name", "Kalyani Nagar").id;
+    const prods = indexBy_(rows_("Products"), "id");
+    const size = (name, label) => rows_("Variants").find((v) => prods[v.product_id].name === name && (!label || v.size_label === label));
+    const sticks = size("Sandal Incense Sticks");
+    const left = stockOf_(sticks.id, kn);
+    if (left > 0) apiTransferStock_({ to_branch_id: 1, lines: [{ variant_id: sticks.id, qty: left }], note: "Sold only at Kondhwa" }, { user: owner, token: "", branch_id: kn });
+    resetReqCache_();
+    const vs = [size("Sandal Incense Sticks"), size("Crystal Attar Bottle", "12ml")];
+    vs.forEach((v) => (v.sold_at = "1"));
+    updateRows_("Variants", vs);
+    bumpCatalogVersion_();
+})()`);
+
 function vm_run(code) {
     require("vm").runInContext(code, ctx);
 }

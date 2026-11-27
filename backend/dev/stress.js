@@ -91,7 +91,8 @@ async function call(who, action, payload, token, branch, reqId) {
 
     // ---- stock to work with at every branch: a test stock-in of 30 of 40 items at each ----
     const cat0 = (await call("owner", "getCatalog", {}, T, 0)).data;
-    const items = cat0.variants.filter((v) => v.active && v.unit === "pcs" && v.sell_price > 0).slice(0, 41);
+    // sizes every branch sells ("Sold at" blank): each branch takes them in and sends them to the others
+    const items = cat0.variants.filter((v) => v.active && v.unit === "pcs" && v.sell_price > 0 && !v.sold_at).slice(0, 41);
     if (items.length < (DRY ? 5 : 41)) throw new Error("not enough sellable items in the copy");
     const lastUnitItem = items.pop(); // kept out of everyone's hands until the last-unit race
     for (const b of branches) {

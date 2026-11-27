@@ -401,6 +401,17 @@ export function Avatar({ name, gold }) {
 
 // showFill: false where the stock shown is not one shelf ("All branches" adds up every shop's)
 export function StockBadge({ item, showFill = true }) {
+  // "Sold at": a size this branch doesn't sell is never low, out or to fill here — it shows only what is left
+  if (item.here === false) {
+    const notSold = <span className="badge">Not sold here</span>;
+    if (item.stock <= 0) return notSold;
+    return (
+      <span className="badge-stack">
+        <span className="badge ok">{item.unit === "ml" ? `${item.stock} ml` : `${item.stock} left`}</span>
+        {notSold}
+      </span>
+    );
+  }
   const badge =
     item.stock <= 0 ? (
       <span className="badge bad">Out of stock</span>

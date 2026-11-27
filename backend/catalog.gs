@@ -43,6 +43,7 @@ function apiGetCatalog_(p, ctx) {
                 };
                 if (showCost) o.avg_cost = v.avg_cost;
                 if (showFill) o.max_level = v.max_level; // "Fill up to": not a salesperson's (see seesFill_)
+                if (v.sold_at) o.sold_at = v.sold_at; // "Sold at": only where it is set — blank, the usual, is every branch
                 return o;
             }),
         },
@@ -59,8 +60,8 @@ function apiGetCatalog_(p, ctx) {
  * the stored copy looks wrong, it is simply rebuilt.
  */
 function catalogCore_(version) {
-    // "cat2_": the stored shape gained max_level — a copy kept from before that is never handed out
-    const key = "cat2_" + version;
+    // "cat3_": the stored shape gained sold_at (cat2_: max_level) — a copy kept from before is never handed out
+    const key = "cat3_" + version;
     const cache = CacheService.getScriptCache();
     const saved = readChunked_(cache, key);
     if (saved) {
@@ -81,11 +82,15 @@ function catalogCore_(version) {
             gender: x.gender, sale_type: x.sale_type, hsn: x.hsn, gst_rate: x.gst_rate,
             image: x.image, description: x.description, active: x.active,
         })),
-        variants: rows_("Variants").map((v) => ({
-            id: v.id, product_id: v.product_id, sku: v.sku, barcode: v.barcode,
-            size_label: v.size_label, size_ml: v.size_ml, unit: v.unit, mrp: v.mrp,
-            sell_price: v.sell_price, reorder_level: v.reorder_level, max_level: v.max_level, active: v.active, avg_cost: v.avg_cost,
-        })),
+        variants: rows_("Variants").map((v) => {
+            const o = {
+                id: v.id, product_id: v.product_id, sku: v.sku, barcode: v.barcode,
+                size_label: v.size_label, size_ml: v.size_ml, unit: v.unit, mrp: v.mrp,
+                sell_price: v.sell_price, reorder_level: v.reorder_level, max_level: v.max_level, active: v.active, avg_cost: v.avg_cost,
+            };
+            if (v.sold_at) o.sold_at = v.sold_at;
+            return o;
+        }),
     };
     try {
         writeChunked_(cache, key, JSON.stringify(core), 21600);
@@ -266,6 +271,9 @@ function cleanVariant_(v, saleType) {
         // "Fill up to". Older app versions don't send it — the saved one is kept (see max_given)
         max_level: num_(v.max_level),
         max_given: v.max_level !== undefined && v.max_level !== null,
+        // "Sold at": the branches that sell it. Sent only when the ticks were changed (and never by older app
+        // versions) — otherwise the saved one is kept, and a new size is sold everywhere
+        sold_given: v.sold_at !== undefined && v.sold_at !== null,
         active: v.active === undefined ? 1 : v.active ? 1 : 0,
         opening_stock: num_(v.opening_stock),
         cost: r2_(num_(v.cost)),
@@ -281,6 +289,7 @@ function cleanVariant_(v, saleType) {
         if (out.max_level > 0 && out.reorder_level > 0 && out.max_level <= out.reorder_level)
             fail_("Fill up to must be more than the low stock alert (" + out.size_label + ")");
     }
+    out.sold_at = out.sold_given ? cleanSoldAt_(v.sold_at, out.size_label) : "";
     return out;
 }
 
@@ -299,6 +308,8 @@ function apiSaveProduct_(p, ctx) {
         if (!findBy_("Categories", "id", Number(p.category_id))) fail_("Please choose a category");
         assertBarcodesUnique_(variantsIn);
         assertSkusUnique_(variantsIn);
+        // opening stock is brought in at this branch, so it must be one that sells the size (before anything is written)
+        variantsIn.forEach((v) => !v.id && v.opening_stock > 0 && assertSoldAt_(v, ctx.branch_id, name + " " + v.size_label));
         const now = nowStr_();
         const brandId = p.brand_id ? Number(p.brand_id) : ensureBrand_(p.brand_name);
 
@@ -334,7 +345,8 @@ function apiSaveProduct_(p, ctx) {
                 Object.assign(ex, {
                     size_label: v.size_label, size_ml: v.size_ml, unit: v.unit, barcode: v.barcode,
                     sku: v.sku_given ? v.sku : ex.sku, mrp: v.mrp, sell_price: v.sell_price, reorder_level: v.reorder_level,
-                    max_level: v.max_given ? v.max_level : ex.max_level, active: v.active, updated_at: now,
+                    max_level: v.max_given ? v.max_level : ex.max_level, sold_at: v.sold_given ? v.sold_at : ex.sold_at,
+                    active: v.active, updated_at: now,
                 });
                 if (v.cost > 0) ex.avg_cost = v.cost;
                 updateRows_("Variants", [ex]);
@@ -344,7 +356,7 @@ function apiSaveProduct_(p, ctx) {
                 id: nextVid++, product_id: prod.id, sku: v.sku, barcode: v.barcode, size_label: v.size_label,
                 size_ml: v.size_ml, unit: v.unit, mrp: v.mrp, sell_price: v.sell_price, avg_cost: v.cost,
                 stock_qty: 0, reorder_level: v.reorder_level, active: v.active,
-                created_at: now, updated_at: now, max_level: v.max_level,
+                created_at: now, updated_at: now, max_level: v.max_level, sold_at: v.sold_at,
             };
             newRows.push(row);
             if (v.opening_stock > 0)
@@ -573,6 +585,26 @@ function apiImportCatalog_(p, ctx) {
             return g;
         };
         const mark = (list, o) => list.indexOf(o) < 0 && list.push(o);
+        // "Sold at" in a file: branch names (as Export writes them) with ; between them ("," too) — "all" is
+        // every branch. A blank cell, or a file without the column, keeps what is saved (a new size: every
+        // branch). A name may itself hold a comma ("Kondhwa, Pune"): the whole cell is tried as one name
+        // first, then the pieces between ;, and only then the pieces between commas.
+        const branchByName = {};
+        rows_("Branches").forEach((b) => (branchByName[str_(b.name).trim().toLowerCase()] = b));
+        const known = (n) => branchByName[n.toLowerCase()];
+        const soldIds = (cell) => {
+            if (blank(cell)) return undefined;
+            const whole = String(cell).trim();
+            if (known(whole)) return [known(whole).id];
+            const pieces = (sep) => whole.split(sep).map((x) => x.trim()).filter(Boolean);
+            let names = pieces(";");
+            if (names.some((n) => !known(n) && n.toLowerCase() !== "all")) names = pieces(/[;,]/);
+            if (names.some((n) => n.toLowerCase() === "all")) return activeBranches_().map((b) => b.id);
+            return names.map((n) => {
+                if (!known(n)) fail_('Unknown branch "' + n + '" in sold_at');
+                return known(n).id;
+            });
+        };
 
         input.forEach((r, i) => {
             const rowNo = Number(r._row) || i + 2; // header is row 1; _row = line in the original file
@@ -645,6 +677,7 @@ function apiImportCatalog_(p, ctx) {
                             // file gives one of the two — a row that names neither is never refused for it
                             max_level: blank(r.max_level) && blank(r.reorder_level) ? undefined : blank(r.max_level) ? match.max_level : r.max_level,
                             cost: blank(r.cost) ? 0 : r.cost,
+                            sold_at: soldIds(r.sold_at),
                         },
                         prod.sale_type,
                     );
@@ -653,6 +686,7 @@ function apiImportCatalog_(p, ctx) {
                         reorder_level: v.reorder_level, avg_cost: v.cost > 0 ? v.cost : match.avg_cost,
                         sku: match.sku || sku, // a size without SKU gets the file's
                         max_level: v.max_given ? v.max_level : match.max_level,
+                        sold_at: v.sold_given ? v.sold_at : match.sold_at,
                     };
                     const nextProd = {};
                     if (!prod._new) {
@@ -688,10 +722,12 @@ function apiImportCatalog_(p, ctx) {
                         size_label: r.size_label, size_ml: r.size_ml, barcode: code || (freeCode(fb) ? fb : ""), mrp: r.mrp,
                         sell_price: r.sell_price, reorder_level: blank(r.reorder_level) ? rfb : r.reorder_level,
                         max_level: blank(r.max_level) ? undefined : r.max_level,
-                        opening_stock: r.opening_stock, cost: r.cost,
+                        opening_stock: r.opening_stock, cost: r.cost, sold_at: soldIds(r.sold_at),
                     },
                     saleType,
                 );
+                // opening stock is brought in at this branch: it must be one that sells the size
+                if (v.opening_stock > 0) assertSoldAt_(v, ctx.branch_id, prodName + " " + v.size_label);
                 if (!prod) {
                     const catName = str_(r.category) || str_(r.new_category); // new_category: guess from the website export, new products only
                     if (!catName) fail_("Category missing");
@@ -711,7 +747,7 @@ function apiImportCatalog_(p, ctx) {
                     id: vid++, product_id: prod.id, sku: str_(r.sku), barcode: v.barcode, size_label: v.size_label,
                     size_ml: v.size_ml, unit: v.unit, mrp: v.mrp, sell_price: v.sell_price, avg_cost: v.cost,
                     stock_qty: 0, reorder_level: v.reorder_level, active: 1, created_at: now, updated_at: now,
-                    max_level: v.max_level, _new: true,
+                    max_level: v.max_level, sold_at: v.sold_at, _new: true,
                 };
                 newVars.push(row);
                 (varsByProd[prod.id] = varsByProd[prod.id] || []).push(row);

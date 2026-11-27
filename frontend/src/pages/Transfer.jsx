@@ -4,7 +4,7 @@ import { useApp } from "../store";
 import { api } from "../lib/api";
 import { runBusy } from "../lib/busy";
 import { navigate } from "../lib/router";
-import { searchItems, lookupBarcode } from "../lib/catalog";
+import { searchItems, lookupBarcode, soldAt, notSoldText } from "../lib/catalog";
 import { r3, qtyLabel } from "../lib/format";
 import { beepError, beepOk, unlockAudio } from "../lib/feedback";
 import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
@@ -40,11 +40,15 @@ export default function Transfer() {
 
   const targets = branches.filter((b) => b.id !== branchId);
   const to = draft.to || (targets.length === 1 ? targets[0].id : 0);
+  const toName = (branches.find((b) => b.id === to) || {}).name;
+  // "Sold at": stock goes only to a branch that sells the size (out of one that doesn't, always)
+  const sellsThere = (item) => !to || soldAt(item, to, branches.length);
 
   // repeat scans add 1; can't send more than this branch has
   const add = (item, qty) => {
     const ex = draft.lines.find((l) => l.variant_id === item.id);
     const next = r3((ex ? ex.qty : 0) + qty);
+    if (!sellsThere(item)) return { ok: false, label: notSoldText(item, toName) };
     if (next > item.stock) return { ok: false, label: `Only ${qtyLabel(item.stock, item.unit)} of ${item.name} ${item.size} here` };
     setDraft((d) => {
       const others = d.lines.filter((l) => l.variant_id !== item.id);
@@ -73,6 +77,8 @@ export default function Transfer() {
 
   const send = async () => {
     if (!to) return toast("Choose the branch to send to", "error");
+    const notThere = lines.find((l) => !sellsThere(l.item));
+    if (notThere) return toast(notSoldText(notThere.item, toName) + " Or remove it from this list.", "error", 5000);
     setBusy(true);
     try {
       const r = await runBusy("Transferring stock…", () => api("transferStock", { to_branch_id: to, note: draft.note, lines: lines.map((l) => ({ variant_id: l.variant_id, qty: l.qty })) }));
@@ -98,7 +104,6 @@ export default function Transfer() {
         </div>
       </>
     );
-  const toName = (branches.find((b) => b.id === to) || {}).name;
 
   return (
     <>
@@ -148,6 +153,7 @@ export default function Transfer() {
                   <div className="title ellipsis">{it.name}</div>
                   <div className="sub">
                     {it.size} · here {qtyLabel(it.stock, it.unit)}
+                    {!sellsThere(it) && <span className="bad-text"> · not sold at {toName}</span>}
                   </div>
                 </div>
                 <ArrowRightLeft size={20} color="var(--brown)" />
@@ -172,6 +178,7 @@ export default function Transfer() {
                     <div className="sub">
                       {l.item.size} · here {qtyLabel(l.item.stock, l.item.unit)}
                     </div>
+                    {!sellsThere(l.item) && <div className="small bad-text bold">Not sold at {toName} — remove it, or tick {toName} in the product</div>}
                   </div>
                   <button className="icon-btn" onClick={() => setDraft((d) => ({ ...d, lines: d.lines.filter((x) => x.variant_id !== l.variant_id) }))} aria-label="Remove">
                     <Trash2 size={18} />

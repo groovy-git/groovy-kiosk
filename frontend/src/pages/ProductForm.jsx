@@ -4,7 +4,7 @@ import { useApp } from "../store";
 import { api } from "../lib/api";
 import { runBusy } from "../lib/busy";
 import { goBack, useRoute } from "../lib/router";
-import { imageUrl } from "../lib/catalog";
+import { imageUrl, soldList } from "../lib/catalog";
 import { compressImage } from "../lib/files";
 import { beepOk } from "../lib/feedback";
 import TopBar from "../components/TopBar";
@@ -13,7 +13,14 @@ import { useBarcodeScanner } from "../hooks/useBarcodeScanner";
 import { Button, Chips, Field, MoneyInput, Seg, Spinner, useConfirm } from "../components/ui";
 
 const GST = [0, 5, 12, 18, 28];
-const blankVariant = (barcode = "") => ({ id: 0, size_label: "", size_ml: "", sku: "", barcode, mrp: "", sell_price: "", cost: "", opening_stock: "", reorder_level: "3", max_level: "", active: 1 });
+// `sold`: the branch ids ticked under "Sold at" — a new size is sold at every branch; `sold0`: as it opened
+const blankVariant = (barcode = "", sold = []) => ({ id: 0, size_label: "", size_ml: "", sku: "", barcode, mrp: "", sell_price: "", cost: "", opening_stock: "", reorder_level: "3", max_level: "", active: 1, sold, sold0: sold.join(",") });
+
+// "Sold at" as ticks over the open branches: blank (every branch) ticks them all
+const soldTicks = (soldAt, openIds) => {
+  const list = soldList(soldAt);
+  return list.length ? openIds.filter((id) => list.includes(id)) : openIds;
+};
 
 // "Fill up to" has to be above the low stock alert, or a low item would have nothing to fill
 const levelError = (v) => {
@@ -23,7 +30,8 @@ const levelError = (v) => {
 };
 
 export default function ProductForm({ id }) {
-  const { rawCatalog, catalog, refreshCatalog, toast, isManager, isAdmin } = useApp();
+  const { rawCatalog, catalog, refreshCatalog, toast, isManager, isAdmin, branches, branchId, branch, multiBranch } = useApp();
+  const openIds = branches.map((b) => b.id);
   const route = useRoute();
   const existing = id ? rawCatalog.products.find((p) => p.id === id) : null;
   const [confirm, confirmNode] = useConfirm();
@@ -40,13 +48,18 @@ export default function ProductForm({ id }) {
     if (existing)
       return rawCatalog.variants
         .filter((v) => v.product_id === existing.id)
-        .map((v) => ({
-          ...v, cost: v.avg_cost ?? "", opening_stock: "", size_ml: v.size_ml || "", sku: v.sku || "",
-          // a catalogue saved on this phone before "Fill up to" existed has none: left undefined, it is
-          // not sent unless typed in, and the server keeps what is saved
-          max_level: v.max_level === undefined ? undefined : v.max_level > 0 ? String(v.max_level) : "",
-        }));
-    return [blankVariant(route.params.get("barcode") || "")];
+        .map((v) => {
+          // "Sold at" is sent only when a tick changes, so the server keeps what is saved otherwise
+          const sold = soldTicks(v.sold_at, openIds);
+          return {
+            ...v, cost: v.avg_cost ?? "", opening_stock: "", size_ml: v.size_ml || "", sku: v.sku || "",
+            // a catalogue saved on this phone before "Fill up to" existed has none: left undefined, it is
+            // not sent unless typed in, and the server keeps what is saved
+            max_level: v.max_level === undefined ? undefined : v.max_level > 0 ? String(v.max_level) : "",
+            sold, sold0: sold.join(","),
+          };
+        });
+    return [blankVariant(route.params.get("barcode") || "", openIds)];
   });
   const [scanFor, setScanFor] = useState(null);
   const [gen, setGen] = useState(""); // which code is being generated: "sku-2" / "bar-0"
@@ -72,6 +85,17 @@ export default function ProductForm({ id }) {
   const set = (patch) => setP((x) => ({ ...x, ...patch }));
   const setV = (i, patch) => setVars((vs) => vs.map((v, j) => (j === i ? { ...v, ...patch } : v)));
   const loose = p.sale_type === "loose";
+
+  // "Sold at" (only with two or more branches open): did a tick change, and what stops the save
+  const soldChanged = (v) => multiBranch && v.sold.join(",") !== v.sold0;
+  const soldError = (v) => {
+    if (!soldChanged(v)) return "";
+    if (!v.sold.length) return "Tick at least one branch that sells it. To stop selling it everywhere, hide it instead.";
+    if (!v.id && Number(v.opening_stock) > 0 && branchId && !v.sold.includes(branchId))
+      return `Opening stock goes in at ${branch ? branch.name : "this branch"}, which isn't ticked. Tick it, or leave opening stock empty.`;
+    return "";
+  };
+  const toggleSold = (i, id, on) => setV(i, { sold: openIds.filter((x) => (x === id ? on : vars[i].sold.includes(x))) });
 
   const onCategory = (cid) => {
     const c = catalog.categories.find((x) => x.id === Number(cid));
@@ -149,6 +173,8 @@ export default function ProductForm({ id }) {
       const c = clash(v.barcode, v.id) || skuClash(v.sku, v.id);
       if (c) return toast(c, "error");
       if (levelError(v)) return toast(`Fill up to must be more than the low stock alert${loose ? "" : ` (${v.size_label || "size"})`}`, "error");
+      const s = soldError(v);
+      if (s) return toast(loose ? s : `${v.size_label || "Size"}: ${s}`, "error", 4000);
     }
     setBusy(true);
     try {
@@ -168,6 +194,7 @@ export default function ProductForm({ id }) {
           opening_stock: v.id ? 0 : v.opening_stock,
           reorder_level: v.reorder_level,
           max_level: v.max_level, // undefined (left out) when this phone's catalogue doesn't know it yet
+          sold_at: soldChanged(v) ? v.sold : undefined, // left out unless a tick changed: the saved one is kept
           active: v.active,
         })),
       };
@@ -390,6 +417,7 @@ export default function ProductForm({ id }) {
                   <input className="input" inputMode="numeric" value={v.max_level ?? ""} onChange={(e) => setV(i, { max_level: e.target.value.replace(/[^\d.]/g, "") })} placeholder="Not set" />
                 </Field>
               </div>
+              {multiBranch && <SoldAt v={v} branches={branches} error={soldError(v)} onToggle={(id, on) => toggleSold(i, id, on)} />}
               {Number(v.sell_price) > 0 && Number(v.cost) > 0 && (
                 <div className="tiny muted">
                   Margin {Math.round(((Number(v.sell_price) - Number(v.cost)) / Number(v.sell_price)) * 100)}% (before GST)
@@ -399,7 +427,7 @@ export default function ProductForm({ id }) {
           );
         })}
         {!loose && (
-          <button className="btn secondary block mt" onClick={() => setVars((vs) => [...vs, blankVariant()])}>
+          <button className="btn secondary block mt" onClick={() => setVars((vs) => [...vs, blankVariant("", openIds)])}>
             <Plus size={18} /> Add another size
           </button>
         )}
@@ -427,5 +455,33 @@ export default function ProductForm({ id }) {
       />
       {confirmNode}
     </>
+  );
+}
+
+// "Sold at": one tick per open branch. A branch unticked while it still has some keeps selling them until
+// they are gone (the server's rule), so the form only says so — it refuses nothing for it.
+function SoldAt({ v, branches, error, onToggle }) {
+  const was = v.sold0.split(",").map(Number);
+  const left = v.id ? branches.filter((b) => was.includes(b.id) && !v.sold.includes(b.id) && ((v.stock_by_branch || {})[b.id] || 0) > 0) : [];
+  const unit = v.unit === "ml" ? " ml" : "";
+  return (
+    <Field
+      label="Sold at"
+      error={error}
+      hint={
+        left.length
+          ? left.map((b) => `${b.name} still has ${v.stock_by_branch[b.id]}${unit} — they stay on sale there until gone.`).join(" ")
+          : "Untick a branch that doesn't sell this size: it won't show there, or count as out of stock."
+      }
+    >
+      <div className="row" style={{ flexWrap: "wrap", gap: "2px 18px" }}>
+        {branches.map((b) => (
+          <label key={b.id} className="row small" style={{ minHeight: 36 }}>
+            <input type="checkbox" checked={v.sold.includes(b.id)} onChange={(e) => onToggle(b.id, e.target.checked)} style={{ width: 20, height: 20, accentColor: "var(--brown)" }} />
+            {b.name}
+          </label>
+        ))}
+      </div>
+    </Field>
   );
 }

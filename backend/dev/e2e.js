@@ -3377,17 +3377,202 @@ check("...and works again once the header is right", xEnv.call("listSales", {}, 
     const i6 = oc("importCatalog", { rows: [{ brand: "", product: "Fill Test", category: "Eau De Parfum", size_label: "100ml", sell_price: 800, barcode: "FL3", reorder_level: 3, max_level: 12 }, { brand: "", product: "Fill Test", category: "Eau De Parfum", size_label: "10ml", sell_price: 100, barcode: "FL4" }] }, 1).data;
     check("import: new sizes take the file's Fill up to, or none", i6.variants === 2 && fv("FL3").max_level === 12 && fv("FL4").max_level === 0, i6);
 
-    // a Sheet from before this version: asks for Setup; Setup adds the column; every size reads "not set"
+    // a Sheet from before this version (no max_level, nor sold_at, added after it): asks for Setup; Setup
+    // adds both columns; every size reads "not set"
     const vSh = fEnv.ss.getSheetByName("Variants");
     const vKeys = Object.keys(require("vm").runInContext("SCHEMA.Variants", fEnv.ctx));
-    const col = vKeys.length;
-    check("max_level is the last Variants column (Setup adds columns only at the end)", vKeys[col - 1] === "max_level");
-    const rng = vSh.getRange(1, col, vSh.getLastRow(), 1);
-    rng.setValues(rng.getValues().map(() => [""]));
+    const col = vKeys.indexOf("max_level") + 1;
+    check("max_level is followed only by sold_at (Setup adds columns only at the end)", vKeys.slice(col - 1).join() === "max_level,sold_at", vKeys);
+    const rng = vSh.getRange(1, col, vSh.getLastRow(), 2);
+    rng.setValues(rng.getValues().map(() => ["", ""]));
     const stale = oc("dashboard", {}, 1);
     check("a Sheet without the column asks for Setup", !stale.success && stale.code === "SETUP", stale);
     fEnv.ctx.setupSheets();
-    check("Setup adds the column back, and sizes read as not set", vSh.getRange(1, col).getValue() === "max_level" && low(1) && low(1).max_level === 0 && low(1).fill === 0, low(1));
+    check(
+        "Setup adds the columns back, and sizes read as not set",
+        vSh.getRange(1, col).getValue() === "max_level" && vSh.getRange(1, col + 1).getValue() === "sold_at" && low(1) && low(1).max_level === 0 && low(1).fill === 0,
+        low(1),
+    );
+}
+
+// ---- "Sold at": a size only some branches sell is not shown, nor called out of stock, where it isn't sold ----
+{
+    const sEnv = createEnv();
+    sEnv.ctx.setupSheets();
+    const sPwd = /Password: (\S+)/.exec(sEnv.alerts.pop())[1];
+    const ST = sEnv.call("login", { email: "owner@groovy.test", password: sPwd }).data.token;
+    const oc = (a, p, b) => sEnv.call(a, p, ST, b === undefined ? 1 : b);
+    const sCat = oc("bootstrap", {}).data.catalog.categories[0].id;
+    const KD = 1;
+    const KN = oc("saveBranch", { name: "Kalyani Nagar", code: "KN" }).data.id;
+    oc("saveBranch", { id: KD, name: "Kondhwa", code: "" });
+    const cv = (code, b) => oc("getCatalog", {}, b).data.variants.find((v) => v.barcode === code);
+    const stored = (code) => {
+        sEnv.ctx.resetReqCache_();
+        return sEnv.ctx.rows_("Variants").find((v) => v.barcode === code);
+    };
+    const stockAt = (code, b) => {
+        sEnv.ctx.resetReqCache_();
+        return sEnv.ctx.stockOf_(stored(code).id, b);
+    };
+
+    // Agarbatti: the 1 pack only at Kondhwa, the 2 pack everywhere (no ticks sent: a new size is sold everywhere)
+    const pack = (code, label, o) => Object.assign({ size_label: label, mrp: 100, sell_price: 90, barcode: code, reorder_level: 3 }, o);
+    const r0 = oc("saveProduct", { name: "Agarbatti", category_id: sCat, gst_rate: 5, variants: [pack("SA1", "1 pack", { opening_stock: 10, sold_at: [KD] }), pack("SA2", "2 pack", { opening_stock: 10 })] });
+    check("Sold at: a size saves as Kondhwa only", r0.success && stored("SA1").sold_at === String(KD), r0.message);
+    check("...a new size with no ticks sent is sold everywhere (stored blank)", stored("SA2").sold_at === "");
+    check("...the catalogue carries sold_at only where it is set", cv("SA1").sold_at === String(KD) && !("sold_at" in cv("SA2")), [cv("SA1"), cv("SA2")]);
+    const PID = r0.data.id;
+    const ids = { SA1: stored("SA1").id, SA2: stored("SA2").id };
+    const save = (o1, o2) => oc("saveProduct", { id: PID, name: "Agarbatti", category_id: sCat, gst_rate: 5, variants: [pack("SA1", "1 pack", Object.assign({ id: ids.SA1 }, o1)), pack("SA2", "2 pack", Object.assign({ id: ids.SA2 }, o2))] });
+    check("a save from an older app (no sold_at sent) keeps it", save({ sell_price: 85 }).success && stored("SA1").sold_at === String(KD) && stored("SA1").sell_price === 85);
+    check("every branch ticked is stored blank: a branch opened later sells it too", save({ sold_at: [KD, KN] }).success && stored("SA1").sold_at === "");
+    const none = save({ sold_at: [] });
+    check("no branch ticked is refused, and nothing changes", /Tick at least one branch that sells 1 pack\. To stop selling it everywhere, hide it instead/.test(none.message) && stored("SA1").sold_at === "", none.message);
+    check("an unknown branch is refused", /Unknown branch \(id 99\)/.test(save({ sold_at: [99] }).message) && stored("SA1").sold_at === "");
+    check("ticks as stored ('1') are taken too", save({ sold_at: String(KD) }).success && stored("SA1").sold_at === String(KD));
+    const notHere = (r) => /Agarbatti 1 pack is not sold at Kalyani Nagar\. Tick Kalyani Nagar for it in the product first\./.test(r.message);
+
+    // Home's low-stock list: at Kalyani Nagar the 1 pack is not low, it isn't sold there; the 2 pack is out
+    const low = (b, code) => oc("dashboard", {}, b).data.low_stock.find((x) => x.variant_id === ids[code]);
+    check("Home at Kalyani Nagar: a size it doesn't sell is not listed as out of stock", !low(KN, "SA1"));
+    check("...one it does sell is, as before", low(KN, "SA2") && low(KN, "SA2").stock_qty === 0);
+    check("...Kondhwa (10 left) lists neither, as before", !low(KD, "SA1") && !low(KD, "SA2"));
+
+    // Stock In and transfers bring stock only into a branch that sells the size; nothing is half-done
+    const batches = () => (sEnv.ctx.resetReqCache_(), sEnv.ctx.rows_("Stock_In_Batches").length);
+    const b0 = batches();
+    const in1 = oc("stockIn", { lines: [{ variant_id: ids.SA2, qty: 2 }, { variant_id: ids.SA1, qty: 5 }] }, KN);
+    check("Stock In at Kalyani Nagar of the Kondhwa-only size is refused, with how to fix it", !in1.success && notHere(in1), in1.message);
+    check("...and the other line in it is not taken in either", stockAt("SA2", KN) === 0 && stockAt("SA1", KN) === 0 && batches() === b0);
+    check("Stock In of the size it does sell goes through", oc("stockIn", { lines: [{ variant_id: ids.SA2, qty: 2 }] }, KN).success && stockAt("SA2", KN) === 2);
+    check("Stock In at Kondhwa of the Kondhwa-only size goes through", oc("stockIn", { lines: [{ variant_id: ids.SA1, qty: 1 }] }, KD).success && stockAt("SA1", KD) === 11);
+    const tr1 = oc("transferStock", { to_branch_id: KN, lines: [{ variant_id: ids.SA2, qty: 1 }, { variant_id: ids.SA1, qty: 2 }] }, KD);
+    check("a transfer to a branch that doesn't sell the size is refused, nothing moved", !tr1.success && notHere(tr1) && stockAt("SA1", KD) === 11 && stockAt("SA2", KD) === 10, tr1.message);
+    check("a transfer of what it does sell goes through", oc("transferStock", { to_branch_id: KN, lines: [{ variant_id: ids.SA2, qty: 1 }] }, KD).success && stockAt("SA2", KN) === 3);
+
+    // selling: never at a branch that doesn't sell it — even with negative stock allowed
+    const sell = (b, code, qty, ref) => oc("completeSale", { client_ref: ref, lines: [{ variant_id: ids[code] || stored(code).id, qty }], payments: [{ method: "cash", amount: 1000 }] }, b);
+    const s1 = sell(KN, "SA1", 1, "sold-at-1");
+    check("a bill at Kalyani Nagar for the Kondhwa-only size is refused", !s1.success && /Agarbatti 1 pack is not sold at Kalyani Nagar$/.test(s1.message), s1.message);
+    oc("saveSettings", { settings: { allow_negative_stock: "yes" } });
+    const s2 = sell(KN, "SA1", 1, "sold-at-2");
+    check("...also with negative stock allowed", !s2.success && /is not sold at Kalyani Nagar$/.test(s2.message), s2.message);
+    check("...while a size it sells may still go below zero there, as before", sell(KN, "SA2", 4, "sold-at-3").success && stockAt("SA2", KN) === -1);
+    check("Kondhwa sells the 1 pack as before", sell(KD, "SA1", 1, "sold-at-4").success && stockAt("SA1", KD) === 10);
+
+    // leftover stock: Kalyani Nagar stops selling a size it still has — those stay on sale there until gone
+    save({ sold_at: [KD, KN] });
+    oc("transferStock", { to_branch_id: KN, lines: [{ variant_id: ids.SA1, qty: 3 }] }, KD);
+    check("leftover: Kalyani Nagar has 3, then stops selling the size", save({ sold_at: [KD] }).success && stockAt("SA1", KN) === 3 && stored("SA1").sold_at === String(KD));
+    const left = cv("SA1", KN);
+    check("...the catalogue still has it there, with its 3 and where it is sold (the app shows it while some are left)", left && left.stock_qty === 3 && left.sold_at === String(KD), left);
+    check("...1 of them sells", sell(KN, "SA1", 1, "sold-at-5").success && stockAt("SA1", KN) === 2);
+    const s6 = sell(KN, "SA1", 3, "sold-at-6");
+    check("...but never more than are left, negative stock allowed or not", !s6.success && /Only 2 pcs of Agarbatti 1 pack in stock at Kalyani Nagar/.test(s6.message), s6.message);
+    check("...2 left, at or under the low alert of 3: still not listed as low there (no refill for it)", !low(KN, "SA1"));
+    const dc = oc("report", { type: "day_close" }, KN).data.items.find((i) => i.variant_id === ids.SA1);
+    check("...Day close lists it as sold, with no refill and no fill", dc && dc.qty === 1 && dc.stock_left === 2 && dc.refill === false && !dc.fill, dc);
+    const dcKD = oc("report", { type: "day_close" }, KD).data.items.find((i) => i.variant_id === ids.SA1);
+    check("...Kondhwa's Day close as before", dcKD && dcKD.qty === 1 && dcKD.refill === false);
+    const sv = (b, code) => oc("report", { type: "stock_valuation" }, b).data.items.find((i) => i.barcode === code);
+    check("Stock value at Kalyani Nagar lists the leftover (2 still worth money)", sv(KN, "SA1") && sv(KN, "SA1").stock_qty === 2);
+    check("...a transfer back out of a branch that doesn't sell it is allowed (that is how leftovers go back)", oc("transferStock", { to_branch_id: KD, lines: [{ variant_id: ids.SA1, qty: 2 }] }, KN).success && stockAt("SA1", KN) === 0);
+    // Kondhwa: 10 opening + 1 in − 1 sold − 3 sent + 2 back = 9
+    check("...and once none are left there, it is gone from Stock value there", !sv(KN, "SA1") && sv(KD, "SA1").stock_qty === 9);
+    check("...sizes it sells stay listed, none left or not", sv(KN, "SA2") !== undefined);
+    check("'All branches' shows it as always", sv(0, "SA1") && sv(0, "SA1").stock_qty === 9 && !low(0, "SA1"));
+    const sp = oc("saveUser", { name: "Sold Seller", email: "sold-sp@x.in", role: "salesperson", password: "shop-pass-1", branch_id: KN, branch_ids: [KN] });
+    const spT = sp.success && sEnv.call("login", { email: "sold-sp@x.in", password: "shop-pass-1" }).data.token;
+    check("a salesperson's catalogue carries sold_at too (their app hides it)", sEnv.call("getCatalog", {}, spT, KN).data.variants.find((v) => v.id === ids.SA1).sold_at === String(KD));
+    oc("saveSettings", { settings: { allow_negative_stock: "no" } });
+
+    // opening stock is brought in where the product is added: a branch that sells it, or nothing is saved
+    const op = oc("saveProduct", { name: "Dhoop", category_id: sCat, gst_rate: 5, variants: [pack("SD1", "1 box", { opening_stock: 5, sold_at: [KD] })] }, KN);
+    check("opening stock at a branch that doesn't sell the new size is refused, and nothing is saved", !op.success && /Dhoop 1 box is not sold at Kalyani Nagar/.test(op.message) && !stored("SD1") && !oc("getCatalog", {}).data.products.some((p) => p.name === "Dhoop"), op.message);
+    check("...with no opening stock it saves", oc("saveProduct", { name: "Dhoop", category_id: sCat, gst_rate: 5, variants: [pack("SD1", "1 box", { sold_at: [KD] })] }, KN).success && stored("SD1").sold_at === String(KD));
+
+    // import: names as Export writes them, "all", blank keeps, an unknown name skips the row
+    const imp = (o, b) => oc("importCatalog", { rows: [Object.assign({ brand: "", product: "Agarbatti", size_label: "2 pack", barcode: "SA2" }, o)] }, b).data;
+    const i1 = imp({ sold_at: "Kondhwa" });
+    check("import: sold_at 'Kondhwa' updates the size", i1.updated === 1 && stored("SA2").sold_at === String(KD), i1);
+    const i2 = imp({ sold_at: "" });
+    check("import: a blank cell keeps it", i2.unchanged === 1 && stored("SA2").sold_at === String(KD), i2);
+    check("import: a file without the column keeps it", imp({}).unchanged === 1 && stored("SA2").sold_at === String(KD));
+    const i3 = imp({ sold_at: "kondhwa; KALYANI NAGAR" });
+    check("import: every branch named (any case, ; between) is stored blank", i3.updated === 1 && stored("SA2").sold_at === "", i3);
+    imp({ sold_at: "Kalyani Nagar" });
+    const i4 = imp({ sold_at: "All" });
+    check("import: 'all' is every branch", i4.updated === 1 && stored("SA2").sold_at === "", i4);
+    const i5 = imp({ sold_at: "Kondhwa, Baner" });
+    check("import: an unknown branch skips the row with the reason, nothing changes", i5.errors.length === 1 && /Unknown branch "Baner" in sold_at/.test(i5.errors[0].message) && stored("SA2").sold_at === "", i5);
+    const i6 = oc("importCatalog", { rows: [
+        { brand: "", product: "Agarbatti", category: "Incense Sticks", size_label: "5 pack", sell_price: 400, barcode: "SA5", sold_at: "Kalyani Nagar", opening_stock: 4 },
+        { brand: "", product: "Agarbatti", category: "Incense Sticks", size_label: "10 pack", sell_price: 700, barcode: "SA10", sold_at: "Kalyani Nagar" },
+    ] }, KD).data;
+    check("import: a new size with opening stock at a branch that doesn't sell it skips that row; the other is added with its branches", i6.variants === 1 && i6.errors.length === 1 && /Agarbatti 5 pack is not sold at Kondhwa/.test(i6.errors[0].message) && !stored("SA5") && stored("SA10").sold_at === String(KN), i6);
+
+    // import: a branch name that itself holds a comma is still read as one branch
+    oc("saveBranch", { id: KD, name: "Kondhwa, Pune", code: "" });
+    const c1 = imp({ sold_at: "Kondhwa, Pune" });
+    check("import: a branch named 'Kondhwa, Pune' is one branch, not two unknown ones", c1.updated === 1 && !c1.errors.length && stored("SA2").sold_at === String(KD), c1);
+    const c2 = imp({ sold_at: "Kondhwa, Pune; Kalyani Nagar" });
+    check("...with ; between it and another branch too", c2.updated === 1 && !c2.errors.length && stored("SA2").sold_at === "", c2);
+    oc("saveBranch", { id: KD, name: "Kondhwa", code: "" });
+
+    // a held bill: the size stopped being sold here after the bill was held — checkout refuses it, saying so
+    save({ sold_at: [KD, KN] });
+    const held = oc("holdBill", { label: "Sold at hold", cart: { lines: [{ variant_id: ids.SA1, qty: 1 }] } }, KN);
+    check("held: a bill held at Kalyani Nagar while it sold the 1 pack", held.success, held.message);
+    save({ sold_at: [KD] });
+    const hs = oc("completeSale", { client_ref: "sold-held-1", held_id: held.data.id, lines: [{ variant_id: ids.SA1, qty: 1 }], payments: [{ method: "cash", amount: 1000 }] }, KN);
+    check("held: checked out after Kalyani Nagar stopped selling it (none there) — refused, saying why", !hs.success && /Agarbatti 1 pack is not sold at Kalyani Nagar$/.test(hs.message), hs.message);
+    check("...and the held bill is kept, to change", oc("listHeld", {}, KN).data.some((h) => h.id === held.data.id));
+
+    // an exchange at Kalyani Nagar whose replacement it doesn't sell: refused, and neither document written
+    oc("stockIn", { lines: [{ variant_id: ids.SA2, qty: 5 }] }, KN); // -1 → 4
+    const xb = sell(KN, "SA2", 1, "sold-x-1").data;
+    const count = (t) => (sEnv.ctx.resetReqCache_(), sEnv.ctx.rows_(t).length);
+    const before = [count("Sales"), count("Returns")];
+    const ex = oc("exchange", { client_ref: "sold-x-2", sale_id: xb.sale.id, items: [{ sale_item_id: xb.items[0].id, qty: 1, restock: true }], reason: "Wrong item", lines: [{ variant_id: ids.SA1, qty: 1 }], payments: [], refund_method: "cash" }, KN);
+    check("exchange: a replacement Kalyani Nagar doesn't sell is refused, saying so", !ex.success && /Agarbatti 1 pack is not sold at Kalyani Nagar/.test(ex.message), ex.message);
+    check("...no credit note, no new bill", count("Sales") === before[0] && count("Returns") === before[1]);
+    const ex2 = oc("exchange", { client_ref: "sold-x-3", sale_id: xb.sale.id, items: [{ sale_item_id: xb.items[0].id, qty: 1, restock: true }], reason: "Wrong item", lines: [{ variant_id: ids.SA2, qty: 1 }], payments: [], refund_method: "cash" }, KN);
+    check("...one it does sell goes through, as before", ex2.success, ex2.message);
+
+    // a void at a branch that has since stopped selling the size: the stock comes back as a leftover, sold off as usual
+    const left2 = stockAt("SA2", KN);
+    save({}, { sold_at: [KD] });
+    const vb = sell(KN, "SA2", left2, "sold-v-1");
+    check("void: Kalyani Nagar sells off its last 2 packs after it stopped selling them", vb.success && stockAt("SA2", KN) === 0, vb.message);
+    check("...a further one is refused: not sold there", /Agarbatti 2 pack is not sold at Kalyani Nagar$/.test(sell(KN, "SA2", 1, "sold-v-2").message));
+    check("...the bill is voided", oc("voidSale", { id: vb.data.sale.id, reason: "Rung up by mistake" }, KN).success);
+    check("...its stock is back there as a leftover", stockAt("SA2", KN) === left2 && cv("SA2", KN).stock_qty === left2 && cv("SA2", KN).sold_at === String(KD));
+    check("...and sells off again", sell(KN, "SA2", 1, "sold-v-3").success && stockAt("SA2", KN) === left2 - 1);
+
+    // the nightly email: a leftover sold today (and now out) is not marked for refill
+    sEnv.mails.length = 0;
+    sEnv.ctx.sendBranchDayCloses_(false, "test");
+    const knMail = sEnv.mails.find((m) => /Kalyani Nagar/.test(m.subject));
+    const line = (size) => ((knMail && knMail.body) || "").split("\n").find((l) => l.startsWith("- Agarbatti " + size + ":"));
+    check("nightly email: Kalyani Nagar's lists the 1 pack sold, none left, no REFILL", !!line("1 pack") && /left 0$/.test(line("1 pack")), line("1 pack"));
+    check("...nor for the 2 pack it sells off", !!line("2 pack") && !/REFILL/.test(line("2 pack")), line("2 pack"));
+    save({}, { sold_at: [KD, KN] });
+    sEnv.mails.length = 0;
+    sEnv.ctx.sendBranchDayCloses_(false, "test");
+    const knMail2 = sEnv.mails.find((m) => /Kalyani Nagar/.test(m.subject));
+    const line2 = ((knMail2 && knMail2.body) || "").split("\n").find((l) => l.startsWith("- Agarbatti 2 pack:"));
+    check("...once it is sold there again, a low 2 pack says REFILL, as before", /<< REFILL$/.test(line2 || ""), line2);
+
+    // a branch closes, leaving one open: the shop is one shop again and everything is sold there (the form
+    // shows no ticks then, so a size that was only the closed branch's could not otherwise be put back)
+    const in10 = oc("stockIn", { lines: [{ variant_id: stored("SA10").id, qty: 1 }] }, KD);
+    check("two branches open: the Kalyani Nagar-only size is not taken in at Kondhwa", !in10.success && /Agarbatti 10 pack is not sold at Kondhwa/.test(in10.message), in10.message);
+    oc("saveBranch", { id: KN, name: "Kalyani Nagar", code: "KN", active: 0 });
+    check("one branch open: Kondhwa sells it — Stock In goes through", oc("stockIn", { lines: [{ variant_id: stored("SA10").id, qty: 1 }] }, KD).success && stockAt("SA10", KD) === 1);
+    check("...and a bill for it", sell(KD, "SA10", 1, "sold-at-7").success);
+    const one = oc("saveProduct", { id: PID, name: "Agarbatti", category_id: sCat, gst_rate: 5, variants: [pack("SA10", "10 pack", { id: stored("SA10").id, mrp: 700, sell_price: 700, sold_at: [KD] })] });
+    check("...saving it with the only open branch ticked stores blank (every branch)", one.success && stored("SA10").sold_at === "", one.message);
 }
 
 // ---- cash at the kiosk: the drawer counted on from the owner's last count (cash.gs) ----

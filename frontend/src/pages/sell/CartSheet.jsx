@@ -89,7 +89,8 @@ export default function CartSheet({ open, onClose, preview, onCheckout, onHeld }
           const it = catalog.byVariant.get(l.variant_id);
           if (!it) return null;
           const lineGross = r2(it.price * l.qty);
-          const max = allowNeg ? 100000 : it.stock;
+          // a size this branch no longer sells ("Sold at"): only what is left, whatever the setting says
+          const max = allowNeg && it.here !== false ? 100000 : it.stock;
           return (
             <div key={l.variant_id} className="list-item" style={{ cursor: "default", alignItems: "flex-start", flexWrap: "wrap" }}>
               <Thumb item={it} size={46} />

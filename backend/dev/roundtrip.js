@@ -62,8 +62,10 @@ const lib = (f) => import(pathToFileURL(path.join(__dirname, "..", "..", "fronte
     const header = csv.split("\n")[0];
     const sizes = cat0.items.length;
     check("export: one row per size, hidden ones included", csv.split("\n").length - 1 >= sizes && cat0.items.some((i) => !i.active), sizes);
-    check("export: the template's columns, in its order, then image and the info columns",
-        header.startsWith(IMPORT_TEMPLATE.split("\n")[0] + ",image,info_hidden,info_stock_"), header);
+    check("export: the template's columns, in its order, then image, sold_at (two branches) and the info columns",
+        header.startsWith(IMPORT_TEMPLATE.split("\n")[0] + ",image,sold_at,info_hidden,info_stock_"), header);
+    check("export with one branch: no sold_at column — the file is as it always was",
+        catalogToImportCSV(cat0, [branches[0]]).split("\n")[0] === IMPORT_TEMPLATE.split("\n")[0] + ",image,info_hidden,info_stock_" + branches[0].name);
     check("export: a reading-only stock column for each branch", branches.every((b) => header.includes("info_stock_" + b.name)) && branches.length === 2, header);
     check("export: owner's file carries cost", /,1200\.5,/.test(csv));
     check("export: long barcode and leading-zero codes are written as text for Excel",
@@ -134,6 +136,27 @@ const lib = (f) => import(pathToFileURL(path.join(__dirname, "..", "..", "fronte
     fillBad.find((r) => r.barcode === "6291108735411").max_level = "2";
     check("...a Fill up to at the low alert skips that row only, saying why", (() => { const d = send(fillBad)[0].data; return d.errors.length === 1 && /Fill up to must be more/.test(d.errors[0].message) && d.unchanged === sizes - 1; })());
     check("...and leaves it as it was", catalogNow().byBarcode.get("6291108735411").max === 10);
+
+    // ---- "Sold at" goes round the file as branch names ----
+    const [kd, kn] = branches;
+    const soldRows = parseCSV(catalogToImportCSV(catalogNow(), branches));
+    check("export: sold_at is blank on every size sold everywhere (all of them, so far)", soldRows.every((r) => r.sold_at === ""));
+    soldRows.find((r) => r.barcode === "6291108735411").sold_at = kd.name;
+    const dS = send(soldRows)[0].data;
+    const catS = catalogNow();
+    check("edited sold_at: 1 updated, the rest unchanged, and that size is now Kondhwa's only",
+        dS.updated === 1 && dS.unchanged === sizes - 1 && dS.errors.length === 0 && catS.byBarcode.get("6291108735411").soldAt.join() === String(kd.id), dS);
+    const csvS = catalogToImportCSV(catS, branches);
+    const rowS = parseCSV(csvS).find((r) => r.barcode === "6291108735411");
+    check("...exported again it reads Kondhwa, and importing that changes nothing", rowS.sold_at === kd.name && send(parseCSV(csvS))[0].data.unchanged === sizes, rowS.sold_at);
+    const catKN = buildCatalog(call("getCatalog", {}, T, kn.id).data, branches.length);
+    check("...at Kalyani Nagar (none there) the app hides it; its other size shows as before",
+        catKN.byBarcode.get("6291108735411").shown === false && catKN.byBarcode.get("0123456789012").shown === true && catKN.items.filter((i) => !i.shown).length === 1);
+    const csvKN = catalogToImportCSV(catKN, branches);
+    check("...an export made at Kalyani Nagar is the same file (sold_at is not the branch's own view)", csvKN.split("\n").find((l) => l.includes("6291108735411")).includes(`,${kd.name},`));
+    const back = parseCSV(csvS);
+    back.find((r) => r.barcode === "6291108735411").sold_at = "all";
+    check("...'all' puts it back to every branch", send(back)[0].data.updated === 1 && catalogNow().byBarcode.get("6291108735411").soldAt.length === 0);
 
     // ---- the refill list (Stock → Low stock → Download refill list): the same file, low items only ----
     oc("adjustStock", { variant_id: cat2.byBarcode.get("6291108735411").id, mode: "set", qty: 1 }); // 1 left: alert 2, Fill up to 10

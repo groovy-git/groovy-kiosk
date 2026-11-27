@@ -11,15 +11,32 @@ export const isLow = (item, stock = item.stock) => stock <= 0 || (item.reorder >
 // Stock below zero is an empty shelf, not a deeper hole to fill.
 export const fillQty = (item, stock = item.stock) => (item.max > 0 && isLow(item, stock) ? r3(Math.max(0, item.max - Math.max(0, stock))) : 0);
 
+/* "Sold at" — the same rule as soldAt_ in backend/branches.gs. */
+
+// the branch ids a size is limited to, from "1,2" as stored; [] = every branch (blank, the usual)
+export const soldList = (s) => String(s || "").split(",").map(Number).filter(Boolean);
+
+// Does this branch sell the size? Blank = every branch; "All branches" (0) is every shop; with one branch
+// open the shop is one shop and sells everything. `open`: how many branches are open.
+export const soldAt = (item, branchId, open) => !item.soldAt.length || !Number(branchId) || item.soldAt.includes(Number(branchId)) || open <= 1;
+
+// what the app says about a size a branch doesn't sell — the server's words. `fix`: say how to change it
+// (for bringing stock in; at the counter there is nothing for the salesperson to tick)
+export const notSoldText = (item, branchName, fix = true) =>
+  `${item.name} ${item.size} is not sold at ${branchName}` + (fix ? `. Tick ${branchName} for it in the product first.` : "");
+
 export function imageUrl(img, w = 400) {
   if (!img) return "";
   if (img.startsWith("drive:")) return `https://lh3.googleusercontent.com/d/${img.slice(6)}=w${w}`;
   return img;
 }
 
-export function buildCatalog(cat) {
+// `open`: how many branches are open (for "Sold at"; with none known yet, everything shows as before)
+export function buildCatalog(cat, open = 0) {
   const empty = { items: [], byVariant: new Map(), byBarcode: new Map(), products: [], productById: new Map(), brands: [], categories: [], brandById: new Map(), catById: new Map() };
   if (!cat) return empty;
+  // the branch whose stock this copy holds (0 = "All branches"): "here" for every item below
+  const here = Number(cat._branch ?? cat.branch_id) || 0;
   const brandById = new Map(cat.brands.map((b) => [b.id, b]));
   const catById = new Map(cat.categories.map((c) => [c.id, c]));
   const productById = new Map(cat.products.map((p) => [p.id, p]));
@@ -58,7 +75,11 @@ export function buildCatalog(cat) {
       image: p.image,
       active: !!(v.active && p.active),
       search: `${p.name} ${brand ? brand.name : ""} ${v.size_label} ${v.barcode} ${v.sku} ${category ? category.name : ""}`.toLowerCase(),
+      soldAt: soldList(v.sold_at), // "Sold at": [] = every branch
     };
+    // sold at this branch — or not, but some are left on its shelf: shown until they are gone
+    it.here = soldAt(it, here, open);
+    it.shown = it.here || it.stock > 0;
     items.push(it);
     byVariant.set(v.id, it);
     if (v.barcode) byBarcode.set(v.barcode, it);
